@@ -1,0 +1,173 @@
+// TinyDTLS DTLS 1.2 LTL Specification - Minimal Working Version
+
+enum request {
+  requestNotSet,
+  c2s_ClientHello,
+  c2s_ClientHello_with_cookie,
+  c2s_ClientKeyExchange,
+  c2s_Finished,
+  c2s_ChangeCipherSpec,
+  c2s_Alert,
+  c2s_ApplicationData
+};
+
+enum response {
+  responseNotSet,
+  s2c_HelloVerifyRequest,
+  s2c_ServerHello,
+  s2c_ServerKeyExchange,
+  s2c_ServerHelloDone,
+  s2c_Finished,
+  s2c_ChangeCipherSpec,
+  s2c_Alert,
+  s2c_ApplicationData
+};
+
+int content_type;
+int epoch;
+int record_length;
+bool cookie_valid;
+bool encrypted;
+bool mac_ok;
+bool handshake_complete;
+bool cipher_negotiated;
+
+
+/* Basic Handshake Flow */
+
+/* 1) HelloVerifyRequest must be preceded by ClientHello without valid cookie */
+H(
+  response = s2c_HelloVerifyRequest ->
+    O(request = c2s_ClientHello & cookie_valid = false)
+);
+
+/* 2) ServerHello must be preceded by ClientHello with valid cookie */
+H(
+  response = s2c_ServerHello ->
+    O(request = c2s_ClientHello_with_cookie & cookie_valid = true)
+);
+
+/* 3) ServerHelloDone must come after ServerHello */
+H(
+  response = s2c_ServerHelloDone ->
+    O(response = s2c_ServerHello)
+);
+
+/* 4) ClientKeyExchange must come after ServerHelloDone */
+H(
+  request = c2s_ClientKeyExchange ->
+    O(response = s2c_ServerHelloDone)
+);
+
+/* 5) Server ChangeCipherSpec must come after ClientKeyExchange */
+H(
+  response = s2c_ChangeCipherSpec ->
+    O(request = c2s_ClientKeyExchange)
+);
+
+/* 6) Server Finished must come after server ChangeCipherSpec */
+H(
+  response = s2c_Finished ->
+    O(response = s2c_ChangeCipherSpec)
+);
+
+
+/* Encryption Properties */
+
+/* 7) After both ChangeCipherSpec messages, all records must be encrypted */
+H(
+  encrypted = true S (
+    (request = c2s_ChangeCipherSpec & O(response = s2c_ChangeCipherSpec)) |
+    (response = s2c_ChangeCipherSpec & O(request = c2s_ChangeCipherSpec))
+  )
+);
+
+/* 8) MAC must be valid for all encrypted records */
+H(
+  encrypted = true ->
+    mac_ok = true
+);
+
+/* 9) ChangeCipherSpec must come after key exchange */
+H(
+  (request = c2s_ChangeCipherSpec | response = s2c_ChangeCipherSpec) ->
+    O(request = c2s_ClientKeyExchange)
+);
+
+/* 10) Finished messages must be encrypted */
+H(
+  (request = c2s_Finished | response = s2c_Finished) ->
+    encrypted = true
+);
+
+
+/* Application Data Properties */
+
+/* 11) No application data before handshake complete */
+H(
+  (request = c2s_ApplicationData | response = s2c_ApplicationData) ->
+    handshake_complete = true
+);
+
+/* 12) Application data must be encrypted */
+H(
+  (request = c2s_ApplicationData | response = s2c_ApplicationData) ->
+    encrypted = true
+);
+
+/* 13) No application data before both Finished messages */
+H(
+  (request = c2s_ApplicationData | response = s2c_ApplicationData) ->
+    (O(request = c2s_Finished) & O(response = s2c_Finished))
+);
+
+
+/* Epoch Properties */
+
+/* 14) Epoch 0 means unencrypted */
+H(
+  epoch = 0 ->
+    encrypted = false
+);
+
+/* 15) Encrypted records must use epoch > 0 */
+H(
+  encrypted = true ->
+    epoch > 0
+);
+
+
+/* Cipher Negotiation */
+
+/* 16) Cipher must be negotiated before key exchange */
+H(
+  request = c2s_ClientKeyExchange ->
+    O(cipher_negotiated = true)
+);
+
+/* 17) Cipher negotiation happens in ServerHello */
+H(
+  cipher_negotiated = true ->
+    O(response = s2c_ServerHello)
+);
+
+
+/* Handshake Completion */
+
+/* 18) Handshake complete requires both Finished messages */
+H(
+  handshake_complete = true ->
+    (O(request = c2s_Finished) & O(response = s2c_Finished))
+);
+
+/* 19) Both ChangeCipherSpec messages must precede handshake completion */
+H(
+  handshake_complete = true ->
+    (O(request = c2s_ChangeCipherSpec) & O(response = s2c_ChangeCipherSpec))
+);
+
+/* 20) ServerHello must come before handshake is complete */
+H(
+  handshake_complete = true ->
+    O(response = s2c_ServerHello)
+);

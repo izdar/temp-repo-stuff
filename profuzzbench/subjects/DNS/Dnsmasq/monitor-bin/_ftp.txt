@@ -1,0 +1,135 @@
+// FTP SPEC - Security AND Implementation Bugs
+// Catches critical security issues AND state machine bugs
+// Expected: 10-40 violations per 24h on buggy server
+
+enum ftp_command {
+    cmdNotSet, cmdUSER, cmdPASS, cmdACCT, cmdCWD, cmdCDUP, cmdSMNT, cmdQUIT,
+    cmdREIN, cmdPORT, cmdPASV, cmdTYPE, cmdSTRU, cmdMODE, cmdRETR, cmdSTOR,
+    cmdSTOU, cmdAPPE, cmdALLO, cmdREST, cmdRNFR, cmdRNTO, cmdABOR, cmdDELE,
+    cmdRMD, cmdMKD, cmdPWD, cmdLIST, cmdNLST, cmdSITE, cmdSYST, cmdSTAT,
+    cmdHELP, cmdNOOP, cmdFEAT, cmdOPTS, cmdAUTH, cmdPBSZ, cmdPROT, cmdEPRT,
+    cmdEPSV, cmdSIZE, cmdMLSD, cmdMLST
+};
+
+enum ftp_status_class {
+    scNotSet, scPreliminary, scSuccess, scIntermediate,
+    scTransientError, scPermanentError
+};
+
+enum auth_state { authNone, authUserSent, authPasswordSent, authComplete, authFailed };
+enum data_state { dataNotSet, dataPORT, dataPASV, dataEPRT, dataEPSV, dataActive, dataClosed };
+enum transfer_type { typeNotSet, typeASCII, typeBinary, typeEBCDIC, typeLocal };
+
+int resp_code;
+int sequence_number;
+int port_number;
+int file_size;
+int rest_position;
+
+bool cmd_malformed;
+bool resp_malformed;
+bool user_logged_in;
+bool data_connection_open;
+bool transfer_in_progress;
+bool timeout;
+bool connection_closed;
+bool user_sent;
+bool pass_sent;
+bool login_successful;
+bool login_failed;
+bool port_sent;
+bool pasv_sent;
+bool pasv_response_received;
+bool port_accepted;
+bool retr_sent;
+bool stor_sent;
+bool transfer_started;
+bool transfer_complete;
+bool transfer_aborted;
+bool rnfr_sent;
+bool rnfr_accepted;
+bool rnto_sent;
+bool session_initialized;
+bool quit_sent;
+bool reinit_sent;
+
+// ========== SECURITY BUGS (Rules 1-5) ==========
+
+/* RULE 1: Authentication Bypass - Success without credentials */
+H(!(timeout=false & resp_malformed=false & 
+   ftp_command=cmdPASS & ftp_status_class=scSuccess & resp_code=230 & 
+   user_sent=false));
+// CRITICAL: Login without USER command
+
+/* RULE 2: Protected Command Without Login */
+H(!(timeout=false & resp_malformed=false & 
+   user_logged_in=false & 
+   (ftp_command=cmdRETR | ftp_command=cmdSTOR | ftp_command=cmdDELE | 
+    ftp_command=cmdRNFR | ftp_command=cmdRNTO) &
+   ftp_status_class=scSuccess & resp_code>=200 & resp_code<300));
+// CRITICAL: File operations without authentication
+
+/* RULE 3: Status Class Mismatch */
+H((timeout=false & resp_malformed=false & resp_code!=0 & ftp_status_class!=scNotSet) ->
+  (
+    (resp_code>=200 & resp_code<300 -> ftp_status_class=scSuccess) &
+    (resp_code>=500 & resp_code<600 -> ftp_status_class=scPermanentError)
+  ));
+// CRITICAL: Status class contradictions
+
+/* RULE 4: RNTO Without RNFR */
+H(!(timeout=false & resp_malformed=false & 
+   ftp_command=cmdRNTO & ftp_status_class=scSuccess & 
+   rnfr_accepted=false));
+// CRITICAL: Rename without source specification
+
+/* RULE 5: Login After Logout */
+H(!(timeout=false & resp_malformed=false & 
+   connection_closed=true & 
+   ftp_command=cmdPASS & ftp_status_class=scSuccess));
+// CRITICAL: Session state corruption
+
+// ========== IMPLEMENTATION BUGS (Rules 6-11) ==========
+
+/* RULE 6: Success Should Not Close Connection (Except QUIT) */
+H((timeout=false & resp_malformed=false & 
+   ftp_status_class=scSuccess & 
+   ftp_command!=cmdQUIT & ftp_command!=cmdNotSet) ->
+  (resp_code!=221));
+// HIGH: State machine confusion (catches SYST bug!)
+
+/* RULE 7: SYST Must Return 215 */
+H((timeout=false & resp_malformed=false & 
+   ftp_command=cmdSYST & ftp_status_class=scSuccess) -> 
+  (resp_code=215));
+// HIGH: Wrong response code for SYST
+
+/* RULE 8: PWD Must Return 257 */
+H((timeout=false & resp_malformed=false & 
+   ftp_command=cmdPWD & ftp_status_class=scSuccess) -> 
+  (resp_code=257));
+// HIGH: Wrong response code for PWD
+
+/* RULE 9: FEAT Must Return 211 */
+H((timeout=false & resp_malformed=false & 
+   ftp_command=cmdFEAT & ftp_status_class=scSuccess) -> 
+  (resp_code=211));
+// HIGH: Wrong response code for FEAT
+
+/* RULE 10: PORT Must Return 200 */
+H((timeout=false & resp_malformed=false & 
+   ftp_command=cmdPORT & ftp_status_class=scSuccess) -> 
+  (resp_code=200));
+// HIGH: Wrong response code for PORT
+
+/* RULE 11: PASV Must Return 227 */
+H((timeout=false & resp_malformed=false & 
+   ftp_command=cmdPASV & ftp_status_class=scSuccess) -> 
+  (resp_code=227));
+// HIGH: Wrong response code for PASV
+
+// ========== END OF SPEC ==========
+// 11 rules total:
+// - 5 security bugs (Rules 1-5)
+// - 6 implementation bugs (Rules 6-11)
+// Expected violations: 10-40 per 24h

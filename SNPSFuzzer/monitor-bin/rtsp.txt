@@ -1,0 +1,153 @@
+// RTSP SPEC - Security AND Implementation Bugs
+// Catches critical security issues AND state machine bugs
+// Expected: 10-40 violations per 24h on buggy server
+
+enum rtsp_method {
+    mNotSet,
+    mOPTIONS,
+    mDESCRIBE,
+    mSETUP,
+    mPLAY,
+    mPAUSE,
+    mTEARDOWN,
+    mANNOUNCE,
+    mGET_PARAMETER,
+    mSET_PARAMETER,
+    mREDIRECT,
+    mRECORD
+};
+
+enum status_class {
+    scNotSet,
+    scINFO,         // 1xx
+    scSUCCESS,      // 2xx
+    scREDIRECT,     // 3xx
+    scCLIENT_ERR,   // 4xx
+    scSERVER_ERR    // 5xx
+};
+
+int req_cseq;
+int resp_cseq;
+int resp_status_code;
+
+bool req_malformed;
+bool resp_malformed;
+bool cseq_match;
+bool resp_has_session;
+bool session_established;
+bool timeout;
+
+bool req_has_session;
+bool session_id_match;
+bool session_id_changed;
+bool teardown_for_existing_session;
+bool teardown_without_session;
+bool transport_req_udp;
+bool transport_req_tcp;
+bool transport_resp_udp;
+bool transport_resp_tcp;
+bool transport_client_ports_present;
+bool transport_server_ports_present;
+
+int setup_success_count;
+int play_success_count;
+bool all_tracks_setup;
+bool keepalive_getparam;
+bool keepalive_failed;
+
+// ========== SECURITY BUGS (Rules 1-7) ==========
+
+/* RULE 1: Status Class Mismatch - SUCCESS with Non-2xx Code */
+H((timeout=false & resp_malformed=false & status_class=scSUCCESS) -> 
+  (resp_status_code>=200 & resp_status_code<300));
+// CRITICAL: Server claims success but sends error code
+// Detects: State machine bugs, response corruption
+
+/* RULE 2: PLAY Without Session Establishment */
+H((timeout=false & resp_malformed=false & rtsp_method=mPLAY & 
+   session_established=false) -> 
+  (status_class!=scSUCCESS));
+// CRITICAL: PLAY succeeds without SETUP
+// Detects: Session bypass, authentication issues
+
+/* RULE 3: TEARDOWN Without Session */
+H((timeout=false & resp_malformed=false & rtsp_method=mTEARDOWN & 
+   teardown_without_session=true) -> 
+  !(status_class=scSUCCESS));
+// CRITICAL: TEARDOWN succeeds on non-existent session
+// Detects: Session state corruption
+
+/* RULE 4: Session ID Changed During Session */
+H((timeout=false & resp_malformed=false & session_established=true) -> 
+  (session_id_changed=false));
+// CRITICAL: Session ID changes mid-session
+// Detects: Session hijacking, state corruption
+
+/* RULE 5: Session ID Mismatch for PLAY/TEARDOWN */
+H((timeout=false & resp_malformed=false & session_established=true & 
+   req_has_session=true & 
+   (rtsp_method=mPLAY | rtsp_method=mTEARDOWN)) -> 
+  (session_id_match=true));
+// CRITICAL: Request uses wrong session ID
+// Detects: Session confusion, potential hijacking
+
+/* RULE 6: TEARDOWN Must Reference Existing Session */
+H((timeout=false & resp_malformed=false & rtsp_method=mTEARDOWN & 
+   status_class=scSUCCESS) -> 
+  (teardown_for_existing_session=true));
+// CRITICAL: TEARDOWN succeeds without valid session reference
+// Detects: State machine bypass
+
+/* RULE 7: CSeq Mismatch on SUCCESS */
+H((timeout=false & resp_malformed=false & status_class=scSUCCESS) -> 
+  (cseq_match=true));
+// CRITICAL: Response CSeq doesn't match request
+// Detects: Response spoofing, protocol violations
+
+// ========== IMPLEMENTATION BUGS (Rules 8-13) ==========
+
+/* RULE 8: Successful SETUP Missing Session Header */
+H((timeout=false & resp_malformed=false & rtsp_method=mSETUP & 
+   status_class=scSUCCESS) -> 
+  (resp_has_session=true));
+// HIGH: SETUP success without Session header
+// Detects: Protocol violation, incomplete response
+
+/* RULE 9: Session Header on Non-Success Response */
+H((timeout=false & resp_malformed=false & resp_has_session=true) -> 
+  (status_class=scSUCCESS));
+// HIGH: Session header on error response
+// Detects: Response formatting bugs
+
+/* RULE 10: UDP Request Gets TCP Response */
+H((timeout=false & resp_malformed=false & rtsp_method=mSETUP & 
+   status_class=scSUCCESS & transport_req_udp=true) -> 
+  (transport_resp_tcp=false));
+// HIGH: Transport mismatch (requested UDP, got TCP)
+// Detects: Transport negotiation bugs
+
+/* RULE 11: TCP Request Gets Non-TCP Response */
+H((timeout=false & resp_malformed=false & rtsp_method=mSETUP & 
+   status_class=scSUCCESS & transport_req_tcp=true) -> 
+  (transport_resp_tcp=true));
+// HIGH: Transport mismatch (requested TCP, got UDP)
+// Detects: Transport negotiation bugs
+
+/* RULE 12: UDP Response Missing Server Ports */
+H((timeout=false & resp_malformed=false & rtsp_method=mSETUP & 
+   status_class=scSUCCESS & transport_resp_udp=true) -> 
+  (transport_server_ports_present=true));
+// HIGH: UDP response without server ports
+// Detects: Incomplete transport negotiation
+
+/* RULE 13: PLAY Count Exceeds SETUP Count */
+H((timeout=false & resp_malformed=false) -> 
+  (play_success_count<=setup_success_count));
+// HIGH: More PLAY successes than SETUP successes
+// Detects: State tracking bugs, session leaks
+
+// ========== END OF SPEC ==========
+// 13 rules total:
+// - 7 security bugs (Rules 1-7)
+// - 6 implementation bugs (Rules 8-13)
+// Expected violations: 10-40 per 24h

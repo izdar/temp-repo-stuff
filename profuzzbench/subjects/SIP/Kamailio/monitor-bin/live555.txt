@@ -1,0 +1,247 @@
+// ========================= Declarations =========================
+
+// --- RTSP methods ---
+enum rtsp_method {
+    mNotSet,
+    mOPTIONS,
+    mDESCRIBE,
+    mSETUP,
+    mPLAY,
+    mPAUSE,
+    mTEARDOWN,
+    mANNOUNCE,
+    mGET_PARAMETER,
+    mSET_PARAMETER,
+    mREDIRECT,
+    mRECORD
+};
+
+// --- RTSP status classes ---
+enum status_class {
+    scNotSet,
+    scINFO,         // 1xx
+    scSUCCESS,      // 2xx
+    scREDIRECT,     // 3xx
+    scCLIENT_ERR,   // 4xx
+    scSERVER_ERR    // 5xx
+};
+
+// ---------------- Integers ----------------
+int req_cseq;         // request CSeq
+int resp_cseq;        // response CSeq
+int resp_status_code; // numeric status
+
+// ---------------- Booleans ----------------
+bool req_malformed;
+bool resp_malformed;
+bool cseq_match;
+bool resp_has_session;
+bool session_established;
+bool timeout;
+
+// ========================= Live555-specific predicates =========================
+
+// Request-side Session header
+bool req_has_session;          // request includes "Session:" header
+bool session_id_match;         // request Session matches the active one
+bool session_id_changed;       // server changed Session ID after establishment
+
+// TEARDOWN behavior
+bool teardown_for_existing_session; // TEARDOWN had a valid current Session ID
+bool teardown_without_session;      // TEARDOWN had no Session header
+
+// Transport negotiation (from Transport headers in SETUP req/resp)
+bool transport_req_udp;        // client requested UDP transport
+bool transport_req_tcp;        // client requested RTP over RTSP (TCP interleaved)
+bool transport_resp_udp;       // server answered UDP
+bool transport_resp_tcp;       // server answered RTP over RTSP (TCP interleaved)
+bool transport_client_ports_present; // client_port= present in req Transport
+bool transport_server_ports_present; // server_port= present in resp Transport
+
+// Multi-track behavior
+int  setup_success_count;      // # of successful SETUPs (2xx)
+int  play_success_count;       // # of successful PLAYs (2xx)
+bool all_tracks_setup;         // true if all known tracks were SETUP successfully
+
+// Keep-alive behavior
+bool keepalive_getparam;       // GET_PARAMETER used with a Session header
+bool keepalive_failed;         // GET_PARAMETER with Session errored or timed out
+
+
+// ========================= Properties (H(...)) ==================
+
+// ------------------------------------------------------------------
+// 0x — Structural sanity
+// ------------------------------------------------------------------
+
+// 00 — No status code when timeout
+H( timeout = true -> resp_status_code = 0 );
+
+// 01 — If we have a status code, we didn't timeout
+H( resp_status_code > 0 -> timeout = false );
+
+// 02 — Malformed response never SUCCESS
+H( resp_malformed = true -> !(status_class = scSUCCESS) );
+
+// 03 — Malformed request should not yield SUCCESS
+H( req_malformed = true -> !(status_class = scSUCCESS) );
+
+// ------------------------------------------------------------------
+// 1x — Status class sanity
+// ------------------------------------------------------------------
+
+// 10 — SUCCESS implies 2xx code
+H( status_class = scSUCCESS ->
+    (resp_status_code >= 200 & resp_status_code < 300) );
+
+// 11 — CLIENT_ERR implies 4xx
+H( status_class = scCLIENT_ERR ->
+    (resp_status_code >= 400 & resp_status_code < 500) );
+
+// 12 — SERVER_ERR implies 5xx
+H( status_class = scSERVER_ERR ->
+    (resp_status_code >= 500 & resp_status_code < 600) );
+
+// ------------------------------------------------------------------
+// 2x — CSeq correlation
+// ------------------------------------------------------------------
+
+// 20 — Response must echo CSeq when request had one
+H( (req_cseq > 0) -> resp_cseq > 0 );
+
+// 21 — Both present => must match
+H( (req_cseq > 0 & resp_cseq > 0) -> cseq_match = true );
+
+// 22 — Any SUCCESS must have matching CSeq
+H( status_class = scSUCCESS -> cseq_match = true );
+
+// ------------------------------------------------------------------
+// 3x — Session setup semantics
+// ------------------------------------------------------------------
+
+// 30 — Successful SETUP must include Session header
+H( (rtsp_method = mSETUP & status_class = scSUCCESS) -> resp_has_session = true );
+
+// 31 — Session established only after successful SETUP
+H( session_established = true ->
+    Y( O( rtsp_method = mSETUP & status_class = scSUCCESS & resp_has_session = true ) ) );
+
+// 32 — Session header only valid on success
+H( resp_has_session = true -> status_class = scSUCCESS );
+
+// ------------------------------------------------------------------
+// 4x — Method/state correctness
+// ------------------------------------------------------------------
+
+// 40 — PLAY cannot succeed before session established
+H( (rtsp_method = mPLAY & session_established = false) -> status_class != scSUCCESS );
+
+// 41 — TEARDOWN cannot succeed before session established
+H( (rtsp_method = mTEARDOWN & session_established = false) -> status_class != scSUCCESS );
+
+// 42 — After successful TEARDOWN, no further success allowed
+H( O( rtsp_method = mTEARDOWN & status_class = scSUCCESS ) ->
+   !( O( status_class = scSUCCESS & (rtsp_method = mPLAY | rtsp_method = mSETUP) ) ) );
+
+// 43 — Once a session is established, SETUP success must have happened
+H( session_established = true ->
+    O( rtsp_method = mSETUP & status_class = scSUCCESS ) );
+
+// 44 — Successful PLAY implies existing session
+H( (rtsp_method = mPLAY & status_class = scSUCCESS) -> session_established = true );
+
+// ------------------------------------------------------------------
+// 5x — Robustness and consistency
+// ------------------------------------------------------------------
+
+// 50 — Timeout → not SUCCESS
+H( timeout = true -> !(status_class = scSUCCESS) );
+
+// 51 — SERVER_ERR never SUCCESS
+H( status_class = scSERVER_ERR -> !(status_class = scSUCCESS) );
+
+// 52 — CLIENT_ERR never SUCCESS
+H( status_class = scCLIENT_ERR -> !(status_class = scSUCCESS) );
+
+// 53 — Once timeout occurs, no later success for same testcase
+H( timeout = true -> !( O( status_class = scSUCCESS ) ) );
+
+// ========================= Live555-specific Properties ==================
+
+// ------------------------------------------------------------------
+// 6x — Session ID integrity
+// ------------------------------------------------------------------
+
+// 60 — Once a session is established, the Session ID must not change.
+H( session_established = true -> session_id_changed = false );
+
+// 61 — For PLAY/TEARDOWN with a Session header, the Session ID must match.
+H( (session_established = true
+    & req_has_session = true
+    & (rtsp_method = mPLAY | rtsp_method = mTEARDOWN))
+   -> session_id_match = true );
+
+// 62 — If TEARDOWN succeeds, it should refer to an existing Session.
+H( (rtsp_method = mTEARDOWN & status_class = scSUCCESS) ->
+    teardown_for_existing_session = true );
+
+// 63 — TEARDOWN without Session header should not succeed
+//      (strong but useful to catch Live555 accepting ambiguous TEARDOWNs).
+H( (rtsp_method = mTEARDOWN & teardown_without_session = true) ->
+    !(status_class = scSUCCESS) );
+
+// ------------------------------------------------------------------
+// 7x — Transport negotiation correctness
+// ------------------------------------------------------------------
+
+// 70 — If client requested UDP, server should not silently switch to TCP.
+H( (rtsp_method = mSETUP
+    & status_class = scSUCCESS
+    & transport_req_udp = true)
+   -> transport_resp_tcp = false );
+
+// 71 — If client requested RTP-over-RTSP (TCP), server should answer TCP/interleaved.
+H( (rtsp_method = mSETUP
+    & status_class = scSUCCESS
+    & transport_req_tcp = true)
+   -> (transport_resp_tcp = true) );
+
+// 72 — If server chooses UDP, it must provide server_port.
+H( (rtsp_method = mSETUP
+    & status_class = scSUCCESS
+    & transport_resp_udp = true)
+   -> transport_server_ports_present = true );
+
+// 73 — For UDP SETUP, client must have provided client_port.
+H( (rtsp_method = mSETUP
+    & transport_req_udp = true)
+   -> transport_client_ports_present = true );
+
+// ------------------------------------------------------------------
+// 8x — Multi-track & PLAY behavior
+// ------------------------------------------------------------------
+
+// 80 — Successful PLAY should not happen if we know not all tracks are SETUP.
+H( (rtsp_method = mPLAY & status_class = scSUCCESS) ->
+    all_tracks_setup = true );
+
+// 81 — If multiple SETUPs were successful, PLAY should eventually succeed.
+H( setup_success_count > 1 ->
+    O( rtsp_method = mPLAY & status_class = scSUCCESS ) );
+
+// 82 — Number of successful PLAYs should not exceed #successful SETUPs
+//      (very rough heuristic, but catches some bad state reuse).
+H( play_success_count <= setup_success_count );
+
+// ------------------------------------------------------------------
+// 9x — Keep-alive behavior (GET_PARAMETER as ping)
+// ------------------------------------------------------------------
+
+// 90 — GET_PARAMETER used as keep-alive on an established session should not fail.
+H( (session_established = true
+    & keepalive_getparam = true)
+   -> keepalive_failed = false );
+
+// 91 — If keep-alive failed, we should not see later SUCCESS for the same session.
+//      (catches "zombie" sessions that Live555 might still accept after error/timeout).
+H( keepalive_failed = true -> !( O( status_class = scSUCCESS ) ) );

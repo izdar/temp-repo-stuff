@@ -1,0 +1,118 @@
+// SSH CRITICAL VIOLATIONS ONLY - Ultra-restrictive spec
+// Only reports violations that indicate real security/logic bugs
+
+enum request {
+  requestNotSet,
+  c2s_kexinit,
+  c2s_kexdh_init,
+  c2s_kex_ecdh_init,
+  c2s_newkeys_request,
+  c2s_service_request_userauth,
+  c2s_userauth_request,
+  c2s_channel_open,
+  c2s_channel_window_adjust,
+  c2s_channel_data,
+  c2s_channel_eof,
+  c2s_channel_close,
+  c2s_channel_request,
+  c2s_global_request,
+  c2s_disconnect,
+  c2s_unimplemented,
+  c2s_debug
+};
+
+enum response {
+  responseNotSet,
+  s2c_banner,
+  s2c_kexinit,
+  s2c_kexdh_reply,
+  s2c_kex_ecdh_reply,
+  s2c_newkeys_response,
+  s2c_service_accept_userauth,
+  s2c_userauth_failure,
+  s2c_userauth_success,
+  s2c_userauth_banner,
+  s2c_channel_open_confirmation,
+  s2c_channel_open_failure,
+  s2c_channel_window_adjust,
+  s2c_channel_data,
+  s2c_channel_eof,
+  s2c_channel_close,
+  s2c_channel_request_response,
+  s2c_global_request_response,
+  s2c_disconnect,
+  s2c_unimplemented,
+  s2c_debug
+};
+
+bool encrypted;
+bool mac_ok;
+bool hostkey_present;
+bool sig_ok;
+
+int  pkt_len;
+int  pad_len;
+int  chan_data_len;
+
+int  auth_attempts;
+bool is_auth_method_none;
+
+bool report_violation;
+int  violation_code;
+
+// ========== CRITICAL VIOLATIONS ONLY (7 RULES) ==========
+// Focused on encryption, authentication, and MitM prevention
+
+/* RULE 1: Invalid MAC After NEWKEYS */
+H((response != responseNotSet & response != s2c_banner &
+   O(request = c2s_newkeys_request) & O(response = s2c_newkeys_response)) ->
+  (mac_ok = true));
+// CRITICAL: MAC validation failure after encryption enabled
+// Detects: MitM attacks, memory corruption, crypto bugs
+
+/* RULE 2: Unencrypted Responses After NEWKEYS */
+H((response != responseNotSet & response != s2c_newkeys_response & 
+   response != s2c_banner &
+   O(response = s2c_newkeys_response) & O(request = c2s_newkeys_request)) ->
+  (encrypted = true));
+// CRITICAL: Server sending plaintext after encryption negotiated
+// Detects: Downgrade attacks, crypto state machine bugs
+
+/* RULE 3: Missing Hostkey or Invalid Signature in KEX */
+H((response = s2c_kexdh_reply | response = s2c_kex_ecdh_reply) ->
+  (hostkey_present = true & sig_ok = true));
+// CRITICAL: KEX reply without hostkey or with invalid signature
+// Detects: MitM attacks, authentication bypass
+
+/* RULE 4: Authentication Bypass - Zero Attempts */
+H((response = s2c_userauth_success) ->
+  (auth_attempts > 0));
+// CRITICAL: Auth success without any authentication attempts
+// Detects: Authentication bypass bugs
+
+/* RULE 5: "None" Method Authentication */
+H((response = s2c_userauth_success) ->
+  (is_auth_method_none = false));
+// CRITICAL: Server accepts "none" authentication method
+// Detects: Authentication misconfiguration
+
+/* RULE 6: Unencrypted Authentication Messages */
+H((response = s2c_userauth_failure | response = s2c_userauth_success) ->
+  ((O(request = c2s_newkeys_request) & O(response = s2c_newkeys_response)) ->
+   encrypted = true));
+// CRITICAL: Auth responses sent in plaintext
+// Detects: Credential leakage, downgrade attacks
+
+/* RULE 7: Channel Data with Invalid Length */
+H((response = s2c_channel_data) ->
+  (chan_data_len > 0));
+// CRITICAL: Channel data message with zero or negative length
+// Detects: Integer overflow, buffer handling bugs
+
+// ========== END OF CRITICAL RULES ==========
+// Removed 16 rules that caused false positives:
+// - KEX sequencing (packet reordering in fuzzing)
+// - Channel establishment sequencing (state tracking issues)
+// - Service/auth sequencing (ordering assumptions)
+// - Disconnect semantics (complex state dependencies)
+// - Padding checks (too strict, non-security)

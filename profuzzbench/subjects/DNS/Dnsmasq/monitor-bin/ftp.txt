@@ -1,0 +1,90 @@
+// FTP CRITICAL VIOLATIONS ONLY - Ultra-restrictive spec
+// Only reports violations that indicate real security/logic bugs
+
+enum ftp_command {
+    cmdNotSet, cmdUSER, cmdPASS, cmdACCT, cmdCWD, cmdCDUP, cmdSMNT, cmdQUIT,
+    cmdREIN, cmdPORT, cmdPASV, cmdTYPE, cmdSTRU, cmdMODE, cmdRETR, cmdSTOR,
+    cmdSTOU, cmdAPPE, cmdALLO, cmdREST, cmdRNFR, cmdRNTO, cmdABOR, cmdDELE,
+    cmdRMD, cmdMKD, cmdPWD, cmdLIST, cmdNLST, cmdSITE, cmdSYST, cmdSTAT,
+    cmdHELP, cmdNOOP, cmdFEAT, cmdOPTS, cmdAUTH, cmdPBSZ, cmdPROT, cmdEPRT,
+    cmdEPSV, cmdSIZE, cmdMLSD, cmdMLST
+};
+
+enum ftp_status_class {
+    scNotSet, scPreliminary, scSuccess, scIntermediate,
+    scTransientError, scPermanentError
+};
+
+enum auth_state { authNone, authUserSent, authPasswordSent, authComplete, authFailed };
+enum data_state { dataNotSet, dataPORT, dataPASV, dataEPRT, dataEPSV, dataActive, dataClosed };
+enum transfer_type { typeNotSet, typeASCII, typeBinary, typeEBCDIC, typeLocal };
+
+int resp_code;
+int sequence_number;
+int port_number;
+int file_size;
+int rest_position;
+
+bool cmd_malformed;
+bool resp_malformed;
+bool user_logged_in;
+bool data_connection_open;
+bool transfer_in_progress;
+bool timeout;
+bool connection_closed;
+bool user_sent;
+bool pass_sent;
+bool login_successful;
+bool login_failed;
+bool port_sent;
+bool pasv_sent;
+bool pasv_response_received;
+bool port_accepted;
+bool retr_sent;
+bool stor_sent;
+bool transfer_started;
+bool transfer_complete;
+bool transfer_aborted;
+bool rnfr_sent;
+bool rnfr_accepted;
+bool rnto_sent;
+bool session_initialized;
+bool quit_sent;
+bool reinit_sent;
+
+// ========== CRITICAL VIOLATIONS ONLY ==========
+// Only 5 rules that catch real security/logic bugs
+
+/* RULE 1: Authentication Bypass - Success without credentials */
+H(!(timeout=false & resp_malformed=false & 
+   ftp_command=cmdPASS & ftp_status_class=scSuccess & resp_code=230 & 
+   user_sent=false)); 
+
+/* RULE 2: Protected Command Without Login - File operations without auth */
+H(!(timeout=false & resp_malformed=false & 
+   user_logged_in=false & 
+   (ftp_command=cmdRETR | ftp_command=cmdSTOR | ftp_command=cmdDELE | 
+    ftp_command=cmdRNFR | ftp_command=cmdRNTO) &
+   ftp_status_class=scSuccess & resp_code>=200 & resp_code<300));  // VIOLATION: File operation succeeded without authentication!
+
+/* RULE 3: Status Class Mismatch - Critical inconsistencies only */
+H((timeout=false & resp_malformed=false & resp_code!=0 & ftp_status_class!=scNotSet) ->
+  (
+    // Success (2xx) must have scSuccess
+    (resp_code>=200 & resp_code<300 -> ftp_status_class=scSuccess) &
+    // Permanent Error (5xx) must have scPermanentError
+    (resp_code>=500 & resp_code<600 -> ftp_status_class=scPermanentError)
+  ));
+
+/* RULE 4: RNTO Without RNFR Succeeds - State machine violation */
+H(!(timeout=false & resp_malformed=false & 
+   ftp_command=cmdRNTO & ftp_status_class=scSuccess & 
+   rnfr_accepted=false));  // VIOLATION: RNTO succeeded without RNFR!
+
+/* RULE 5: Login After Logout - Session state confusion */
+H(!(timeout=false & resp_malformed=false & 
+   connection_closed=true & 
+   ftp_command=cmdPASS & ftp_status_class=scSuccess));  // VIOLATION: Login succeeded on closed connection!
+
+// ========== END OF SPEC ==========
+// All other protocol variations are considered acceptable

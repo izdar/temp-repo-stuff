@@ -1,0 +1,87 @@
+
+H(
+    (request=client_commit_bad) -> response != timeout 
+);
+
+H(
+    (request=client_commit_success & !(rg_container & support=supported))
+    -> response != timeout 
+);
+
+H(
+    (request=client_commit_success & rg_container & support=supported)
+    -> response = timeout 
+);
+
+H(
+    response=ap_confirm_success -> 
+    O(request=client_commit_success & response=ap_commit_success)
+
+);
+
+H(
+    response=association_response -> request=association_request & 
+    Y
+    ( 
+        O(
+            request=client_confirm_success & response=ap_confirm_success & 
+            O(
+                request=client_commit_success & response=ap_commit_success
+            )
+        )
+    )
+);
+
+
+H(
+    request=client_commit_reuse & Y(O(response=ap_confirm_success)) -> 
+    response=timeout
+);
+
+
+H(
+    Y(O(response=ap_commit_ac_token)) & request=client_commit_success_ac_token -> 
+    response=ap_commit_success
+);
+
+H(
+    Y(O(response=ap_commit_ac_token)) & (request !=client_commit_success_ac_token & request = client_commit_success) 
+    -> 
+    (response=timeout | response = ap_commit_ac_token)
+);
+
+H(
+    (request=client_commit_error | request = client_commit_bad) & 
+    client_status_code != -1 & client_status_code != 0 & client_status_code != 126 -> 
+    response = timeout
+);
+
+H
+(
+    request=client_commit_success & (client_status_code=0 | client_status_code = 126) & 
+    group != -1 & (group < 19 | group > 21) -> 
+    (
+        response=ap_commit_error & ap_status_code=77
+    )
+);
+
+H(
+    ((request=client_commit_error | request=client_commit_bad | request=client_commit_success) 
+    & client_status_code=77 & group != prev_ap_group) -> 
+    (
+        response=timeout
+    )
+);
+
+
+H(
+    request=client_commit_bad & client_status_code=77 & group = prev_ap_group -> 
+    response=timeout 
+);
+
+H(
+    ((request=client_commit_error  | request=client_commit_success) 
+    & client_status_code=77 & group = prev_ap_group) ->   
+    (response = ap_commit_success & (ap_group >= 19 & ap_group <= 21))
+);
+

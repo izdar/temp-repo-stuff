@@ -1,0 +1,237 @@
+/*
+  ssh_reqresp_properties.ltl
+
+  Predicates (ADT enums + scalars) and Past-time LTL properties
+  for SSH fuzzer operating on request/response pairs.  This file:
+   - uses ADT-style enums `request` and `response` (no numeric tags)
+   - reasons only over observable I/O events (requests and matching responses)
+   - uses past-time operators: H(...), O(...), Y, S (since)
+   - contains no helper predicates or external functions (pure I/O reasoning)
+
+  Usage: the monitor must set the current event's `request` OR `response`
+  (one of them true/active per observed packet/message) and the per-event
+  scalar flags below (encrypted, mac_ok, hostkey_present, sig_ok, pkt_len, pad_len, chan_data_len,
+  auth_attempts, is_auth_method_none). The LTL properties assume the trace is a sequence
+  of alternating request/response observations (the fuzzer pairs inputs -> outputs).
+*/
+
+/* --------------------------
+   ADT enums (request / response event kinds)
+   -------------------------- */
+
+enum request {
+  requestNotSet,
+
+  /* Transport / KEX requests (client->server) */
+  c2s_kexinit,
+  c2s_kexdh_init,
+  c2s_kex_ecdh_init,
+  c2s_newkeys_request,         /* client initiating NEWKEYS (treated as a request) */
+
+  /* Service & Auth requests (client->server) */
+  c2s_service_request_userauth,
+  c2s_userauth_request,        /* USERAUTH_REQUEST (method encoded elsewhere) */
+
+  /* Channel requests (client->server) */
+  c2s_channel_open,
+  c2s_channel_window_adjust,
+  c2s_channel_data,
+  c2s_channel_eof,
+  c2s_channel_close,
+  c2s_channel_request,
+  c2s_global_request,
+
+  /* Misc */
+  c2s_disconnect,
+  c2s_unimplemented,
+  c2s_debug
+};
+
+enum response {
+  responseNotSet,
+
+  /* Transport / KEX responses (server->client) */
+  s2c_kexinit,
+  s2c_kexdh_reply,
+  s2c_kex_ecdh_reply,
+  s2c_newkeys_response,       /* server NEWKEYS (response to KEX/newkeys handshake) */
+
+  /* Service & Auth responses (server->client) */
+  s2c_service_accept_userauth,
+  s2c_userauth_failure,
+  s2c_userauth_success,
+  s2c_userauth_banner,
+
+  /* Channel responses (server->client) */
+  s2c_channel_open_confirmation,
+  s2c_channel_open_failure,
+  s2c_channel_window_adjust,
+  s2c_channel_data,
+  s2c_channel_eof,
+  s2c_channel_close,
+  s2c_channel_request_response,
+  s2c_global_request_response,
+
+  /* Misc */
+  s2c_disconnect,
+  s2c_unimplemented,
+  s2c_debug
+};
+
+/* --------------------------
+   Per-event scalar flags (set for the current observed event)
+   -------------------------- */
+
+bool encrypted;         /* packet was encrypted on the wire */
+bool mac_ok;            /* MAC validated (true/false) for current packet */
+bool hostkey_present;   /* KEX reply included a hostkey blob */
+bool sig_ok;            /* KEX reply signature validated */
+int  pkt_len;           /* total SSH packet length */
+int  pad_len;           /* padding length from packet */
+int  chan_data_len;     /* length of channel data in current event, 0 if not channel data */
+int  auth_attempts;     /* cumulative auth attempts observed so far (monitor-maintained) */
+bool is_auth_method_none;/* last USERAUTH_REQUEST used "none" */
+
+/* Violation reporting */
+bool report_violation;
+int  violation_code;
+
+
+/* --------------------------
+   Past-time LTL Properties for Request-Response pairs
+   (All properties wrapped with H(...). They reason about past requests and responses.)
+   -------------------------- */
+
+/* 1) Every server NEWKEYS (response) must be preceded by client KEXINIT and server KEXINIT requests/responses */
+H(
+  response = s2c_newkeys_response ->
+    ( O(request = c2s_kexinit) & O(response = s2c_kexinit) )
+)
+
+/* 2) Any server KEX reply must include hostkey and a valid signature */
+H(
+  response = s2c_kexdh_reply | response = s2c_kex_ecdh_reply ->
+    ( hostkey_present & sig_ok )
+)
+
+/* 3) After both NEWKEYS have occurred (client request + server response), subsequent responses must be encrypted.
+     Expressed with S: "encrypted must hold since (the instant second NEWKEYS occurred)". */
+H(
+  encrypted = true S ( (request = c2s_newkeys_request & O(response = s2c_newkeys_response)) |
+                       (response = s2c_newkeys_response & O(request = c2s_newkeys_request)) )
+)
+
+/* 4) After second NEWKEYS, MACs must verify on responses */
+H(
+  mac_ok = true S ( (request = c2s_newkeys_request & O(response = s2c_newkeys_response)) |
+                    (response = s2c_newkeys_response & O(request = c2s_newkeys_request)) )
+)
+
+/* 5) Service-accept(userauth) response must follow a prior service-request(userauth) request */
+H(
+  response = s2c_service_accept_userauth -> O(request = c2s_service_request_userauth)
+)
+
+/* 6) USERAUTH_SUCCESS response must follow a USERAUTH_REQUEST request */
+H(
+  response = s2c_userauth_success -> O(request = c2s_userauth_request)
+)
+
+/* 7) USERAUTH_SUCCESS must not appear before rekey/newkeys completed (i.e., after both NEWKEYS) */
+H(
+  response = s2c_userauth_success ->
+    ( O(request = c2s_newkeys_request) & O(response = s2c_newkeys_response) )
+)
+
+/* 8) A USERAUTH_SUCCESS response with zero prior auth attempts is suspicious */
+H(
+  response = s2c_userauth_success -> ( auth_attempts > 0 )
+)
+
+/* 9) USERAUTH_SUCCESS must not be produced in response to AUTH method "none" */
+H(
+  response = s2c_userauth_success -> ( is_auth_method_none = false )
+)
+
+/* 10) A channel open confirmation response must follow a channel open request (matching pair) */
+H(
+  response = s2c_channel_open_confirmation -> O(request = c2s_channel_open)
+)
+
+/* 11) No channel data response should be observed unless an open+confirm pair occurred earlier */
+H(
+  response = s2c_channel_data -> ( O(request = c2s_channel_open) & O(response = s2c_channel_open_confirmation) )
+)
+
+/* 12) No channel data request should be sent by client after the client previously sent a channel_close request */
+H(
+  request = c2s_channel_data -> not O(request = c2s_channel_close)
+)
+
+/* 13) If client sent channel_close request earlier, server should not later send channel_data responses (data-after-close) */
+H(
+  response = s2c_channel_data -> not O(request = c2s_channel_close)
+)
+
+/* 14) Window-adjust responses must be preceded by open+confirm in past */
+H(
+  response = s2c_channel_window_adjust -> ( O(request = c2s_channel_open) & O(response = s2c_channel_open_confirmation) )
+)
+
+/* 15) Channel data lengths in responses must be positive */
+H(
+  response = s2c_channel_data -> ( chan_data_len > 0 )
+)
+
+/* 16) Padding sanity: pad_len must be in allowed coarse range and less than pkt_len */
+H(
+  pkt_len > 0 -> ( pad_len >= 4 & pad_len < 256 & pkt_len > pad_len )
+)
+
+/* 17) No plaintext userauth messages after both NEWKEYS appear (confidentiality enforcement) */
+H(
+  request = c2s_userauth_request | response = s2c_userauth_failure | response = s2c_userauth_success ->
+    ( ( O(request = c2s_newkeys_request) & O(response = s2c_newkeys_response) ) -> encrypted = true )
+)
+
+/* 18) Server NEWKEYS response should be since (i.e., preceded by) the client's KEXDH/KEX_ECDH init */
+H(
+  response = s2c_newkeys_response -> O(request = c2s_kexdh_init | request = c2s_kex_ecdh_init)
+)
+
+/* 19) Rekey discipline: any NEWKEYS response must have past KEXINITs from both sides */
+H(
+  response = s2c_newkeys_response | request = c2s_newkeys_request ->
+    ( O(request = c2s_kexinit) & O(response = s2c_kexinit) )
+)
+
+/* 20) Disconnect responses should not be the first server response; expect prior auth-related feedback */
+H(
+  response = s2c_disconnect -> O(response = s2c_userauth_failure | response = s2c_userauth_banner | response = s2c_userauth_success)
+)
+
+/* 21) Unimplemented response must correspond to some prior request (global/channel) */
+H(
+  response = s2c_unimplemented -> O(request = c2s_global_request | request = c2s_channel_request)
+)
+
+/* 22) Channel open failure response must be in reply to a channel open request */
+H(
+  response = s2c_channel_open_failure -> O(request = c2s_channel_open)
+)
+
+/* 23) Repeated service-accept(userauth) responses without intervening disconnect or rekey is suspicious */
+H(
+  response = s2c_service_accept_userauth ->
+    not O(response = s2c_service_accept_userauth & not ( request = c2s_disconnect | response = s2c_disconnect | request = c2s_newkeys_request | response = s2c_newkeys_response ))
+)
+
+/* 24) A response carrying an invalid MAC (mac_ok = false) after both NEWKEYS is a violation */
+H(
+  ( O(request = c2s_newkeys_request) & O(response = s2c_newkeys_response) ) -> ( mac_ok = true )
+)
+
+/* 25) Channel EOF request must be followed by channel_close request/response before further data */
+H(
+  request = c2s_channel_eof -> O(request = c2s_channel_close) | O(response = s2c_channel_close)
+)

@@ -1,0 +1,160 @@
+// RTSP RESPONSE-ONLY SPEC - Only monitors actual server responses
+// Filters out: client requests, timeouts, malformed messages
+
+enum rtsp_method {
+    mNotSet,
+    mOPTIONS,
+    mDESCRIBE,
+    mSETUP,
+    mPLAY,
+    mPAUSE,
+    mTEARDOWN,
+    mANNOUNCE,
+    mGET_PARAMETER,
+    mSET_PARAMETER,
+    mREDIRECT,
+    mRECORD
+};
+
+enum status_class {
+    scNotSet,
+    scINFO,         // 1xx
+    scSUCCESS,      // 2xx
+    scREDIRECT,     // 3xx
+    scCLIENT_ERR,   // 4xx
+    scSERVER_ERR    // 5xx
+};
+
+int req_cseq;
+int resp_cseq;
+int resp_status_code;
+
+bool req_malformed;
+bool resp_malformed;
+bool cseq_match;
+bool resp_has_session;
+bool session_established;
+bool timeout;
+
+bool req_has_session;
+bool session_id_match;
+bool session_id_changed;
+bool teardown_for_existing_session;
+bool teardown_without_session;
+bool transport_req_udp;
+bool transport_req_tcp;
+bool transport_resp_udp;
+bool transport_resp_tcp;
+bool transport_client_ports_present;
+bool transport_server_ports_present;
+
+int setup_success_count;
+int play_success_count;
+bool all_tracks_setup;
+bool keepalive_getparam;
+bool keepalive_failed;
+
+// ========== RESPONSE-ONLY PROPERTIES ==========
+// All require: timeout=false & !resp_malformed & status_class!=scNotSet
+
+/* 00 - No status code when timeout */
+H((timeout=true) -> (resp_status_code=0));
+
+/* 01 - If we have status code, no timeout */
+H((resp_status_code>0) -> (timeout=false));
+
+/* 02 - Malformed response never SUCCESS */
+H((resp_malformed=true) -> !(status_class=scSUCCESS));
+
+/* 10 - SUCCESS implies 2xx code */
+H((timeout=false & resp_malformed=false & status_class=scSUCCESS) -> 
+  (resp_status_code>=200 & resp_status_code<300));
+
+/* 11 - CLIENT_ERR implies 4xx */
+H((timeout=false & resp_malformed=false & status_class=scCLIENT_ERR) ->
+  (resp_status_code>=400 & resp_status_code<500));
+
+/* 12 - SERVER_ERR implies 5xx */
+H((timeout=false & resp_malformed=false & status_class=scSERVER_ERR) ->
+  (resp_status_code>=500 & resp_status_code<600));
+
+/* 20 - Response must echo CSeq */
+H((timeout=false & resp_malformed=false & req_cseq>0) -> (resp_cseq>0));
+
+/* 21 - Both present => must match */
+H((timeout=false & resp_malformed=false & req_cseq>0 & resp_cseq>0) -> 
+  (cseq_match=true));
+
+/* 22 - SUCCESS must have matching CSeq */
+H((timeout=false & resp_malformed=false & status_class=scSUCCESS) -> 
+  (cseq_match=true));
+
+/* 30 - Successful SETUP must include Session */
+H((timeout=false & resp_malformed=false & rtsp_method=mSETUP & status_class=scSUCCESS) -> 
+  (resp_has_session=true));
+
+/* 32 - Session header only on success */
+H((timeout=false & resp_malformed=false & resp_has_session=true) -> 
+  (status_class=scSUCCESS));
+
+/* 40 - PLAY cannot succeed before session */
+H((timeout=false & resp_malformed=false & rtsp_method=mPLAY & session_established=false) -> 
+  (status_class!=scSUCCESS));
+
+/* 41 - TEARDOWN cannot succeed before session */
+H((timeout=false & resp_malformed=false & rtsp_method=mTEARDOWN & session_established=false) -> 
+  (status_class!=scSUCCESS));
+
+/* 44 - Successful PLAY implies session exists */
+H((timeout=false & resp_malformed=false & rtsp_method=mPLAY & status_class=scSUCCESS) -> 
+  (session_established=true));
+
+/* 50 - Timeout never SUCCESS */
+H((timeout=true) -> !(status_class=scSUCCESS));
+
+/* 51 - SERVER_ERR never SUCCESS */
+H((timeout=false & resp_malformed=false & status_class=scSERVER_ERR) -> 
+  !(status_class=scSUCCESS));
+
+/* 52 - CLIENT_ERR never SUCCESS */
+H((timeout=false & resp_malformed=false & status_class=scCLIENT_ERR) -> 
+  !(status_class=scSUCCESS));
+
+/* 60 - Session ID must not change */
+H((timeout=false & resp_malformed=false & session_established=true) -> 
+  (session_id_changed=false));
+
+/* 61 - Session ID must match for PLAY/TEARDOWN */
+H((timeout=false & resp_malformed=false & session_established=true & req_has_session=true & 
+   (rtsp_method=mPLAY | rtsp_method=mTEARDOWN)) -> (session_id_match=true));
+
+/* 62 - TEARDOWN must refer to existing session */
+H((timeout=false & resp_malformed=false & rtsp_method=mTEARDOWN & status_class=scSUCCESS) -> 
+  (teardown_for_existing_session=true));
+
+/* 63 - TEARDOWN without session should fail */
+H((timeout=false & resp_malformed=false & rtsp_method=mTEARDOWN & teardown_without_session=true) -> 
+  !(status_class=scSUCCESS));
+
+/* 70 - UDP request should not get TCP response */
+H((timeout=false & resp_malformed=false & rtsp_method=mSETUP & status_class=scSUCCESS & 
+   transport_req_udp=true) -> (transport_resp_tcp=false));
+
+/* 71 - TCP request should get TCP response */
+H((timeout=false & resp_malformed=false & rtsp_method=mSETUP & status_class=scSUCCESS & 
+   transport_req_tcp=true) -> (transport_resp_tcp=true));
+
+/* 72 - UDP response must have server ports */
+H((timeout=false & resp_malformed=false & rtsp_method=mSETUP & status_class=scSUCCESS & 
+   transport_resp_udp=true) -> (transport_server_ports_present=true));
+
+/* 80 - PLAY requires all tracks setup */
+H((timeout=false & resp_malformed=false & rtsp_method=mPLAY & status_class=scSUCCESS) -> 
+  (all_tracks_setup=true));
+
+/* 82 - PLAY count cannot exceed SETUP count */
+H((timeout=false & resp_malformed=false) -> (play_success_count<=setup_success_count));
+
+/* 90 - Keep-alive should not fail on established session */
+H((timeout=false & resp_malformed=false & session_established=true & keepalive_getparam=true) -> 
+  (keepalive_failed=false));

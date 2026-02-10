@@ -1,0 +1,408 @@
+
+// ========================= Declarations =========================
+
+// --- SIP Methods ---
+enum sip_method {
+    mNotSet,
+    mINVITE,
+    mACK,
+    mBYE,
+    mCANCEL,
+    mREGISTER,
+    mOPTIONS,
+    mPRACK,
+    mSUBSCRIBE,
+    mNOTIFY,
+    mPUBLISH,
+    mINFO,
+    mREFER,
+    mMESSAGE,
+    mUPDATE
+};
+
+// --- SIP Response Classes ---
+enum sip_status_class {
+    scNotSet,
+    scProvisional,     // 1xx - Provisional responses
+    scSuccess,         // 2xx - Success
+    scRedirection,     // 3xx - Redirection
+    scClientError,     // 4xx - Client Error
+    scServerError,     // 5xx - Server Error
+    scGlobalError      // 6xx - Global Failure
+};
+
+// --- Dialog State ---
+enum dialog_state {
+    dsNone,           // No dialog established
+    dsEarly,          // Early dialog (after provisional response)
+    dsConfirmed,      // Confirmed dialog (after 200 OK to INVITE)
+    dsTerminated      // Dialog terminated
+};
+
+// --- Transaction State ---
+enum transaction_state {
+    tsNone,
+    tsProceeding,     // Request received, processing
+    tsCompleted,      // Final response sent/received
+    tsTerminated      // Transaction terminated
+};
+
+// --- Registration State ---
+enum registration_state {
+    rsNotRegistered,
+    rsRegistering,    // REGISTER sent, waiting for response
+    rsRegistered,     // Successfully registered
+    rsUnregistering   // Unregistering
+};
+
+// ---------------- Integers ----------------
+int resp_code;              // SIP response code (e.g., 100, 200, 404)
+int cseq_number;            // CSeq sequence number
+int expires_value;          // Expires header value
+int max_forwards;           // Max-Forwards header value
+int content_length;         // Content-Length header value
+int retry_after;            // Retry-After header value
+
+// ---------------- Booleans ----------------
+bool req_malformed;         // Request is malformed
+bool resp_malformed;        // Response is malformed
+bool has_to_tag;            // To header has tag parameter
+bool has_from_tag;          // From header has tag parameter
+bool has_call_id;           // Call-ID header present
+bool has_cseq;              // CSeq header present
+bool has_via;               // Via header present
+bool has_contact;           // Contact header present
+bool has_sdp;               // SDP in message body
+bool timeout;               // Request/response timed out
+bool connection_closed;     // Connection closed
+
+// --- Dialog tracking ---
+bool dialog_established;    // Dialog is established
+bool dialog_terminated;     // Dialog has been terminated
+bool early_dialog;          // Early dialog (after 1xx)
+bool invite_sent;           // INVITE sent
+bool invite_received;       // INVITE received
+bool ack_sent;              // ACK sent for 2xx response
+bool bye_sent;              // BYE sent
+bool cancel_sent;           // CANCEL sent
+
+// --- Transaction tracking ---
+bool transaction_pending;   // Transaction in progress
+bool final_response_sent;   // Final response (2xx-6xx) sent
+bool provisional_sent;      // Provisional response (1xx) sent
+bool retransmission;        // Message is a retransmission
+
+// --- Registration tracking ---
+bool register_sent;         // REGISTER request sent
+bool registered;            // Successfully registered
+bool auth_required;         // Authentication required (401/407)
+bool auth_provided;         // Authorization header present
+
+// --- Method sequence tracking ---
+bool invite_in_progress;    // INVITE transaction active
+bool method_requires_dialog;// Method requires existing dialog
+bool method_creates_dialog; // Method creates a dialog
+
+// --- Header consistency ---
+bool cseq_matches;          // CSeq number matches expected
+bool callid_matches;        // Call-ID matches dialog
+bool to_tag_matches;        // To tag matches dialog
+bool from_tag_matches;      // From tag matches dialog
+bool via_matches;           // Via branch matches
+
+// ========================= Properties (H(...)) ==================
+
+// ------------------------------------------------------------------
+// 0x — Message Structure and Syntax
+// ------------------------------------------------------------------
+
+// 00 — Timeout implies no response code
+H( timeout = true -> resp_code = 0 );
+
+// 01 — Response code implies no timeout
+H( resp_code > 0 -> timeout = false );
+
+// 02 — Malformed request should not get success response
+H( req_malformed = true -> sip_status_class != scSuccess );
+
+// 03 — Malformed response is never success
+H( resp_malformed = true -> sip_status_class != scSuccess );
+
+// 04 — Request must have mandatory headers
+H( (sip_method != mNotSet & req_malformed = false) -> 
+    (has_via = true & has_cseq = true & has_call_id = true) );
+
+// 05 — Response must echo mandatory headers from request
+H( (resp_code > 0 & resp_malformed = false) -> 
+    (has_via = true & has_cseq = true & has_call_id = true) );
+
+// 06 — Max-Forwards must be present and > 0 in requests
+H( (sip_method != mNotSet & sip_method != mACK) -> max_forwards > 0 );
+
+// ------------------------------------------------------------------
+// 1x — Response Code Consistency
+// ------------------------------------------------------------------
+
+// 10 — Provisional responses are 1xx
+H( sip_status_class = scProvisional -> 
+    (resp_code >= 100 & resp_code < 200) );
+
+// 11 — Success responses are 2xx
+H( sip_status_class = scSuccess -> 
+    (resp_code >= 200 & resp_code < 300) );
+
+// 12 — Redirection responses are 3xx
+H( sip_status_class = scRedirection -> 
+    (resp_code >= 300 & resp_code < 400) );
+
+// 13 — Client error responses are 4xx
+H( sip_status_class = scClientError -> 
+    (resp_code >= 400 & resp_code < 500) );
+
+// 14 — Server error responses are 5xx
+H( sip_status_class = scServerError -> 
+    (resp_code >= 500 & resp_code < 600) );
+
+// 15 — Global failure responses are 6xx
+H( sip_status_class = scGlobalError -> 
+    (resp_code >= 600 & resp_code < 700) );
+
+// ------------------------------------------------------------------
+// 2x — INVITE Transaction Handling (RFC 3261 Section 13)
+// ------------------------------------------------------------------
+
+// 20 — INVITE must create a dialog
+H( sip_method = mINVITE -> method_creates_dialog = true );
+
+// 21 — 2xx to INVITE requires ACK
+H( (sip_method = mINVITE & resp_code = 200) -> 
+    O(sip_method = mACK) );
+
+// 22 — ACK must follow 2xx response to INVITE
+H( (sip_method = mACK & ack_sent = true) -> 
+    Y(O(sip_method = mINVITE & resp_code = 200)) );
+
+// 23 — Cannot send ACK without prior INVITE
+H( sip_method = mACK -> 
+    Y(O(sip_method = mINVITE)) );
+
+// 24 — INVITE with SDP must get answer in 2xx or 1xx
+H( (sip_method = mINVITE & has_sdp = true & resp_code = 200) -> 
+    has_sdp = true );
+
+// 25 — Early dialog established after provisional response
+H( (sip_method = mINVITE & sip_status_class = scProvisional & has_to_tag = true) -> 
+    early_dialog = true );
+
+// 26 — Confirmed dialog after 2xx to INVITE
+H( (sip_method = mINVITE & resp_code = 200 & has_to_tag = true) -> 
+    dialog_established = true );
+
+// ------------------------------------------------------------------
+// 3x — Dialog Management
+// ------------------------------------------------------------------
+
+// 30 — Dialog requires Call-ID, From tag, and To tag
+H( dialog_established = true -> 
+    (has_call_id = true & has_from_tag = true & has_to_tag = true) );
+
+// 31 — BYE requires existing dialog
+H( sip_method = mBYE -> dialog_established = true );
+
+// 32 — Dialog terminated after successful BYE
+H( (sip_method = mBYE & resp_code = 200) -> 
+    O(dialog_terminated = true) );
+
+// 33 — Cannot use dialog-creating methods in existing dialog
+H( (dialog_established = true & sip_method = mINVITE) -> 
+    dialog_established = false );
+
+// 34 — Methods in dialog must match dialog identifiers
+H( (dialog_established = true & 
+    (sip_method = mBYE | sip_method = mINFO | sip_method = mUPDATE)) ->
+    (callid_matches = true & to_tag_matches = true & from_tag_matches = true) );
+
+// 35 — No operations on terminated dialog
+H( dialog_terminated = true -> 
+    !(sip_method = mBYE | sip_method = mINFO | sip_method = mUPDATE) );
+
+// ------------------------------------------------------------------
+// 4x — CANCEL Handling (RFC 3261 Section 9)
+// ------------------------------------------------------------------
+
+// 40 — CANCEL must match pending INVITE
+H( sip_method = mCANCEL -> 
+    Y(O(sip_method = mINVITE & invite_in_progress = true)) );
+
+// 41 — CANCEL not allowed after final response to INVITE
+H( (sip_method = mINVITE & final_response_sent = true) -> 
+    !(O(sip_method = mCANCEL)) );
+
+// 42 — CANCEL should get 200 OK
+H( (sip_method = mCANCEL & timeout = false) -> 
+    resp_code = 200 );
+
+// 43 — After CANCEL, INVITE should get 487
+H( (sip_method = mCANCEL & resp_code = 200) -> 
+    O(sip_method = mINVITE & resp_code = 487) );
+
+// ------------------------------------------------------------------
+// 5x — Registration (RFC 3261 Section 10)
+// ------------------------------------------------------------------
+
+// 50 — REGISTER must have Contact header
+H( sip_method = mREGISTER -> has_contact = true );
+
+// 51 — Successful registration gets 200 OK
+H( (sip_method = mREGISTER & sip_status_class = scSuccess) -> 
+    resp_code = 200 );
+
+// 52 — Registration may require authentication
+H( (sip_method = mREGISTER & 
+    (resp_code = 401 | resp_code = 407)) -> 
+    auth_required = true );
+
+// 53 — Re-REGISTER after authentication should succeed
+H( (sip_method = mREGISTER & auth_required = true & auth_provided = true) -> 
+    (sip_status_class = scSuccess | sip_status_class = scClientError) );
+
+// 54 — Unregistration (Expires: 0) should succeed if registered
+H( (sip_method = mREGISTER & expires_value = 0 & registered = true) -> 
+    resp_code = 200 );
+
+// 55 — Registered state after successful REGISTER
+H( (sip_method = mREGISTER & resp_code = 200 & expires_value > 0) -> 
+    registered = true );
+
+// ------------------------------------------------------------------
+// 6x — CSeq Handling (RFC 3261 Section 8.1.1.5)
+// ------------------------------------------------------------------
+
+// 60 — CSeq must be present in requests
+H( sip_method != mNotSet -> has_cseq = true );
+
+// 61 — CSeq must be present in responses
+H( resp_code > 0 -> has_cseq = true );
+
+// 62 — Response CSeq must match request CSeq
+H( (resp_code > 0 & sip_method != mNotSet) -> cseq_matches = true );
+
+// 63 — ACK for non-2xx uses request CSeq
+H( (sip_method = mACK & ack_sent = false) -> cseq_matches = true );
+
+// 64 — ACK for 2xx uses new CSeq
+H( (sip_method = mACK & ack_sent = true) -> has_cseq = true );
+
+// ------------------------------------------------------------------
+// 7x — Transaction State Management
+// ------------------------------------------------------------------
+
+// 70 — Provisional response indicates transaction proceeding
+H( sip_status_class = scProvisional -> transaction_pending = true );
+
+// 71 — Final response completes transaction
+H( (sip_status_class = scSuccess | 
+    sip_status_class = scRedirection |
+    sip_status_class = scClientError |
+    sip_status_class = scServerError |
+    sip_status_class = scGlobalError) -> 
+    final_response_sent = true );
+
+// 72 — Multiple provisional responses allowed
+H( (sip_status_class = scProvisional & provisional_sent = true) );
+
+// 73 — Only one final response per transaction
+H( (final_response_sent = true & resp_code > 0) -> 
+    !Y(final_response_sent = true) );
+
+// ------------------------------------------------------------------
+// 8x — Kamailio-Specific Robustness
+// ------------------------------------------------------------------
+
+// 80 — OPTIONS should always get a response
+H( (sip_method = mOPTIONS & timeout = false) -> 
+    (resp_code = 200 | sip_status_class = scClientError) );
+
+// 81 — Malformed Via should be rejected
+H( (has_via = false & sip_method != mNotSet) -> 
+    resp_code = 400 );
+
+// 82 — Missing Call-ID should be rejected
+H( (has_call_id = false & sip_method != mNotSet) -> 
+    resp_code = 400 );
+
+// 83 — Loop detected (Max-Forwards = 0) should be rejected
+H( (max_forwards = 0 & sip_method != mNotSet) -> 
+    resp_code = 483 );
+
+// 84 — Content-Length mismatch should be rejected
+H( (has_sdp = true & content_length = 0) -> 
+    resp_code = 400 );
+
+// 85 — Unsupported method should get 501
+H( (sip_method = mNotSet & req_malformed = false) -> 
+    resp_code = 501 );
+
+// ------------------------------------------------------------------
+// 9x — Error Handling and Recovery
+// ------------------------------------------------------------------
+
+// 90 — Authentication failure should trigger retry
+H( ((resp_code = 401 | resp_code = 407) & auth_required = true) );
+
+// 91 — Request timeout should not crash server
+H( timeout = true -> connection_closed = false );
+
+// 92 — Malformed request should get 400 Bad Request
+H( (req_malformed = true & timeout = false) -> 
+    resp_code = 400 );
+
+// 93 — Server errors should not terminate connection
+H( sip_status_class = scServerError -> connection_closed = false );
+
+// 94 — Multiple retransmissions should be handled
+H( retransmission = true -> resp_code > 0 );
+
+// ------------------------------------------------------------------
+// Ax — SDP and Media Negotiation
+// ------------------------------------------------------------------
+
+// A0 — INVITE with SDP must have Content-Length
+H( (sip_method = mINVITE & has_sdp = true) -> content_length > 0 );
+
+// A1 — 200 OK to INVITE should have SDP if offer was made
+H( (sip_method = mINVITE & has_sdp = true & resp_code = 200) -> 
+    has_sdp = true );
+
+// A2 — UPDATE with SDP requires existing dialog
+H( (sip_method = mUPDATE & has_sdp = true) -> 
+    dialog_established = true );
+
+// ------------------------------------------------------------------
+// Bx — SUBSCRIBE/NOTIFY (RFC 3265)
+// ------------------------------------------------------------------
+
+// B0 — SUBSCRIBE should create dialog
+H( sip_method = mSUBSCRIBE -> method_creates_dialog = true );
+
+// B1 — NOTIFY requires prior SUBSCRIBE
+H( sip_method = mNOTIFY -> 
+    Y(O(sip_method = mSUBSCRIBE & resp_code = 200)) );
+
+// B2 — SUBSCRIBE success should get NOTIFY
+H( (sip_method = mSUBSCRIBE & resp_code = 200) -> 
+    O(sip_method = mNOTIFY) );
+
+// ------------------------------------------------------------------
+// Cx — MESSAGE Method (RFC 3428)
+// ------------------------------------------------------------------
+
+// C0 — MESSAGE should have Content-Length
+H( sip_method = mMESSAGE -> content_length > 0 );
+
+// C1 — MESSAGE success gets 200 OK
+H( (sip_method = mMESSAGE & sip_status_class = scSuccess) -> 
+    resp_code = 200 );
+
+// C2 — MESSAGE doesn't require dialog
+H( sip_method = mMESSAGE -> method_requires_dialog = false );

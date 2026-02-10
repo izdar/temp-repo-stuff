@@ -1,0 +1,301 @@
+// dnsmasq DNS LTL Specification
+// Monitors DNS protocol compliance and security properties
+// Uses ONLY past-time temporal operators (H, O, S)
+
+enum message_type {
+  messageNotSet,
+  query,
+  response
+};
+
+enum opcode {
+  QUERY,
+  IQUERY,
+  STATUS,
+  OPCODE_UNKNOWN
+};
+
+enum rcode {
+  NOERROR,
+  FORMERR,
+  SERVFAIL,
+  NXDOMAIN,
+  NOTIMP,
+  REFUSED,
+  RCODE_UNKNOWN
+};
+
+enum qtype {
+  A,
+  AAAA,
+  MX,
+  NS,
+  CNAME,
+  PTR,
+  SOA,
+  TXT,
+  ANY,
+  QTYPE_UNKNOWN
+};
+
+// Boolean flags from DNS header
+bool is_query;
+bool is_response;
+bool aa;           // Authoritative Answer
+bool tc;           // Truncated
+bool rd;           // Recursion Desired
+bool ra;           // Recursion Available
+bool ad;           // Authenticated Data (DNSSEC)
+bool cd;           // Checking Disabled
+
+// Count fields
+int qdcount;       // Question count
+int ancount;       // Answer count
+int nscount;       // Name server count
+int arcount;       // Additional record count
+
+// Derived predicates
+bool response_valid;
+bool dnssec_ok;
+int query_id;
+bool id_match;
+bool cache_hit;
+bool upstream_queried;
+
+
+/* ============================================================================
+   BASIC PROTOCOL PROPERTIES
+   ============================================================================ */
+
+/* 1) Every response must be preceded by a query */
+H(
+  message_type = response ->
+    O(message_type = query)
+);
+
+/* 2) Query ID matching: responses with unmatched IDs are violations */
+H(
+  !(message_type = response & id_match = false)
+);
+
+/* 3) Responses must have QR flag set correctly */
+H(
+  message_type = response ->
+    is_response = true
+);
+
+/* 4) Queries must have QR flag set correctly */
+H(
+  message_type = query ->
+    is_query = true
+);
+
+
+/* ============================================================================
+   QUESTION SECTION PROPERTIES
+   ============================================================================ */
+
+/* 5) Standard queries must have exactly one question */
+H(
+  (message_type = query & opcode = QUERY) ->
+    qdcount = 1
+);
+
+/* 6) Responses should preserve the question count from the query */
+H(
+  message_type = response ->
+    qdcount = 1
+);
+
+
+/* ============================================================================
+   ANSWER SECTION PROPERTIES
+   ============================================================================ */
+
+/* 7) Queries should not have answers */
+H(
+  message_type = query ->
+    ancount = 0
+);
+
+/* 8) Successful responses (NOERROR) should have answers (unless referral) */
+H(
+  (message_type = response & rcode = NOERROR & aa = true) ->
+    ancount > 0
+);
+
+/* 9) NXDOMAIN responses should have no answers */
+H(
+  (message_type = response & rcode = NXDOMAIN) ->
+    ancount = 0
+);
+
+/* 10) SERVFAIL responses should have no answers */
+H(
+  (message_type = response & rcode = SERVFAIL) ->
+    ancount = 0
+);
+
+
+/* ============================================================================
+   RECURSION PROPERTIES
+   ============================================================================ */
+
+/* 11) If recursion is available, it should have been desired */
+H(
+  ra = true ->
+    O(rd = true)
+);
+
+/* 12) Recursive query responses should have RA flag set if RD was set */
+H(
+  (message_type = response & O(message_type = query & rd = true)) ->
+    ra = true
+);
+
+
+/* ============================================================================
+   AUTHORITATIVE ANSWER PROPERTIES
+   ============================================================================ */
+
+/* 13) AA flag should only be set in responses */
+H(
+  aa = true ->
+    message_type = response
+);
+
+/* 14) Authoritative responses should not need upstream queries */
+H(
+  (message_type = response & aa = true) ->
+    upstream_queried = false
+);
+
+
+/* ============================================================================
+   TRUNCATION PROPERTIES
+   ============================================================================ */
+
+/* 15) TC flag should only be set in responses */
+H(
+  tc = true ->
+    message_type = response
+);
+
+/* 16) If we see a truncated response, a query preceded it */
+H(
+  (message_type = response & tc = true) ->
+    O(message_type = query)
+);
+
+
+/* ============================================================================
+   DNSSEC PROPERTIES
+   ============================================================================ */
+
+/* 17) AD flag should only be set in responses */
+H(
+  ad = true ->
+    message_type = response
+);
+
+/* 18) DNSSEC OK flag implies AD flag in valid responses */
+H(
+  (dnssec_ok = true & response_valid = true) ->
+    ad = true
+);
+
+/* 19) If CD flag in response, it was in the query */
+H(
+  (message_type = response & cd = true) ->
+    O(message_type = query & cd = true)
+);
+
+
+/* ============================================================================
+   ERROR HANDLING PROPERTIES
+   ============================================================================ */
+
+/* 20) FORMERR indicates malformed query */
+H(
+  (message_type = response & rcode = FORMERR) ->
+    O(message_type = query)
+);
+
+/* 21) REFUSED should not have answer data */
+H(
+  (message_type = response & rcode = REFUSED) ->
+    ancount = 0
+);
+
+/* 22) NOTIMP (not implemented) should have no answers */
+H(
+  (message_type = response & rcode = NOTIMP) ->
+    ancount = 0
+);
+
+
+/* ============================================================================
+   CACHE BEHAVIOR PROPERTIES
+   ============================================================================ */
+
+/* 23) Cache hits should not trigger upstream queries */
+H(
+  cache_hit = true ->
+    upstream_queried = false
+);
+
+/* 24) Cache hits should be valid responses */
+H(
+  cache_hit = true ->
+    response_valid = true
+);
+
+
+/* ============================================================================
+   OPCODE PROPERTIES
+   ============================================================================ */
+
+/* 25) Standard queries use QUERY opcode */
+H(
+  (message_type = query & qtype != QTYPE_UNKNOWN) ->
+    opcode = QUERY
+);
+
+/* 26) IQUERY is deprecated and should not be used */
+H(
+  !(opcode = IQUERY)
+);
+
+
+/* ============================================================================
+   QUERY TYPE PROPERTIES
+   ============================================================================ */
+
+/* 27) ANY queries should have RD flag set (typically recursive) */
+H(
+  (message_type = query & qtype = ANY) ->
+    rd = true
+);
+
+/* 28) PTR queries should be well-formed */
+H(
+  (message_type = query & qtype = PTR) ->
+    qdcount = 1
+);
+
+
+/* ============================================================================
+   MESSAGE SEQUENCE PROPERTIES
+   ============================================================================ */
+
+/* 29) Every response should have had a matching query before it */
+H(
+  (message_type = response & id_match = true) ->
+    O(message_type = query)
+);
+
+/* 30) Valid responses should have matching query IDs */
+H(
+  (message_type = response & response_valid = true) ->
+    id_match = true
+);

@@ -1,0 +1,163 @@
+// FTP RESPONSE-ONLY SPEC - Fixed version
+// Addresses false positives and overly strict rules
+
+enum ftp_command {
+    cmdNotSet, cmdUSER, cmdPASS, cmdACCT, cmdCWD, cmdCDUP, cmdSMNT, cmdQUIT,
+    cmdREIN, cmdPORT, cmdPASV, cmdTYPE, cmdSTRU, cmdMODE, cmdRETR, cmdSTOR,
+    cmdSTOU, cmdAPPE, cmdALLO, cmdREST, cmdRNFR, cmdRNTO, cmdABOR, cmdDELE,
+    cmdRMD, cmdMKD, cmdPWD, cmdLIST, cmdNLST, cmdSITE, cmdSYST, cmdSTAT,
+    cmdHELP, cmdNOOP, cmdFEAT, cmdOPTS, cmdAUTH, cmdPBSZ, cmdPROT, cmdEPRT,
+    cmdEPSV, cmdSIZE, cmdMLSD, cmdMLST
+};
+
+enum ftp_status_class {
+    scNotSet, scPreliminary, scSuccess, scIntermediate,
+    scTransientError, scPermanentError
+};
+
+enum auth_state { authNone, authUserSent, authPasswordSent, authComplete, authFailed };
+enum data_state { dataNotSet, dataPORT, dataPASV, dataEPRT, dataEPSV, dataActive, dataClosed };
+enum transfer_type { typeNotSet, typeASCII, typeBinary, typeEBCDIC, typeLocal };
+
+int resp_code;
+int sequence_number;
+int port_number;
+int file_size;
+int rest_position;
+
+bool cmd_malformed;
+bool resp_malformed;
+bool user_logged_in;
+bool data_connection_open;
+bool transfer_in_progress;
+bool timeout;
+bool connection_closed;
+bool user_sent;
+bool pass_sent;
+bool login_successful;
+bool login_failed;
+bool port_sent;
+bool pasv_sent;
+bool pasv_response_received;
+bool port_accepted;
+bool retr_sent;
+bool stor_sent;
+bool transfer_started;
+bool transfer_complete;
+bool transfer_aborted;
+bool rnfr_sent;
+bool rnfr_accepted;
+bool rnto_sent;
+bool session_initialized;
+bool quit_sent;
+bool reinit_sent;
+
+// ========== RESPONSE-ONLY PROPERTIES (FIXED) ==========
+// All require valid responses: timeout=false & resp_malformed=false & ftp_status_class!=scNotSet
+
+/* 1) Session start: 220 */
+H((timeout=false & resp_malformed=false & sequence_number=0 & resp_code!=0) -> 
+  (resp_code=220));
+
+/* 2) QUIT gets 221 */
+H((timeout=false & resp_malformed=false & ftp_command=cmdQUIT & ftp_status_class=scSuccess) -> 
+  (resp_code=221));
+
+/* 3) USER gets 331 (or 230 if no password needed) */
+H((timeout=false & resp_malformed=false & ftp_command=cmdUSER & ftp_status_class=scIntermediate) -> 
+  (resp_code=331));
+
+/* 4) PASS without USER fails */
+H((timeout=false & resp_malformed=false & ftp_command=cmdPASS & user_sent=false) -> 
+  (ftp_status_class=scPermanentError));
+
+/* 5) Successful PASS gets 230 */
+H((timeout=false & resp_malformed=false & ftp_command=cmdPASS & ftp_status_class=scSuccess) -> 
+  (resp_code=230));
+
+/* 6) Failed PASS gets 530 OR 221 (connection closed) - FIXED */
+H((timeout=false & resp_malformed=false & ftp_command=cmdPASS & login_failed=true & resp_code!=221) -> 
+  (resp_code=530));
+
+/* 7) Protected commands without login fail */
+H((timeout=false & resp_malformed=false & user_logged_in=false & 
+   (ftp_command=cmdRETR | ftp_command=cmdSTOR | ftp_command=cmdDELE)) -> 
+  (ftp_status_class!=scSuccess));
+
+/* 8) Successful login sets user_logged_in */
+H((timeout=false & resp_malformed=false & ftp_command=cmdPASS & resp_code=230) -> 
+  (user_logged_in=true));
+
+/* 9) PORT success gets 200 */
+H((timeout=false & resp_malformed=false & ftp_command=cmdPORT & ftp_status_class=scSuccess) -> 
+  (resp_code=200));
+
+/* 10) PASV success gets 227 */
+H((timeout=false & resp_malformed=false & ftp_command=cmdPASV & ftp_status_class=scSuccess) -> 
+  (resp_code=227));
+
+/* 11) Response 227 sets pasv_response_received */
+H((timeout=false & resp_malformed=false & ftp_command=cmdPASV & resp_code=227) -> 
+  (pasv_response_received=true));
+
+/* 12) Transfer start gets 150 or 125 - RELAXED */
+H((timeout=false & resp_malformed=false & (ftp_command=cmdRETR | ftp_command=cmdSTOR) & 
+   ftp_status_class=scPreliminary) -> 
+  ((resp_code=150) | (resp_code=125)));
+
+/* 13) Transfer complete gets 226 or 250 - RELAXED */
+H((timeout=false & resp_malformed=false & transfer_complete=true & ftp_status_class=scSuccess) -> 
+  ((resp_code=226) | (resp_code=250)));
+
+/* 14) RNTO without RNFR fails */
+H((timeout=false & resp_malformed=false & ftp_command=cmdRNTO & rnfr_accepted=false) -> 
+  (ftp_status_class=scPermanentError));
+
+/* 15) RNFR success gets 350 */
+H((timeout=false & resp_malformed=false & ftp_command=cmdRNFR & ftp_status_class=scIntermediate) -> 
+  (resp_code=350));
+
+/* 16) CWD success gets 250 */
+H((timeout=false & resp_malformed=false & ftp_command=cmdCWD & ftp_status_class=scSuccess) -> 
+  (resp_code=250));
+
+/* 17) PWD success gets 257 */
+H((timeout=false & resp_malformed=false & ftp_command=cmdPWD & ftp_status_class=scSuccess) -> 
+  (resp_code=257));
+
+/* 18) scSuccess implies 2xx */
+H((timeout=false & resp_malformed=false & ftp_status_class=scSuccess) -> 
+  (resp_code>=200 & resp_code<300));
+
+/* 19) scIntermediate implies 3xx */
+H((timeout=false & resp_malformed=false & ftp_status_class=scIntermediate) -> 
+  (resp_code>=300 & resp_code<400));
+
+/* 20) scTransientError implies 4xx */
+H((timeout=false & resp_malformed=false & ftp_status_class=scTransientError) -> 
+  (resp_code>=400 & resp_code<500));
+
+/* 21) scPermanentError implies 5xx (or 4xx for transient) - RELAXED */
+H((timeout=false & resp_malformed=false & ftp_status_class=scPermanentError) -> 
+  (resp_code>=500 & resp_code<600));
+
+/* 22) scPreliminary implies 1xx */
+H((timeout=false & resp_malformed=false & ftp_status_class=scPreliminary) -> 
+  (resp_code>=100 & resp_code<200));
+
+/* 23) TYPE success gets 200 */
+H((timeout=false & resp_malformed=false & ftp_command=cmdTYPE & ftp_status_class=scSuccess) -> 
+  (resp_code=200));
+
+/* 24) SYST success gets 215 */
+H((timeout=false & resp_malformed=false & ftp_command=cmdSYST & ftp_status_class=scSuccess) -> 
+  (resp_code=215));
+
+/* 25) FEAT success gets 211 */
+H((timeout=false & resp_malformed=false & ftp_command=cmdFEAT & ftp_status_class=scSuccess) -> 
+  (resp_code=211));
+
+/* 26) NOOP success when initialized */
+H((timeout=false & resp_malformed=false & session_initialized=true & ftp_command=cmdNOOP & 
+   ftp_status_class!=scNotSet) -> 
+  (ftp_status_class=scSuccess));

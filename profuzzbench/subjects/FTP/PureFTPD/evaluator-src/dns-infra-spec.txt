@@ -1,0 +1,257 @@
+// ========================= Declarations =========================
+
+// Enums for query / response types and codes
+enum q_transport  {transNotSet, UDP, TCP};
+enum q_type       {qNotSet, A, AAAA, CNAME, NS, MX, TXT, ANY, OPT, DNSSEC, OTHER};
+enum rcode        {rcNotSet, NOERROR, NXDOMAIN, SERVFAIL, FORMERR, NOTIMP, REFUSED, YXDOMAIN};
+enum rr_kind      {rrNotSet, RR_A, RR_AAAA, RR_CNAME, RR_NS, RR_MX, RR_RRSIG, RR_DNSKEY, RR_DS, RR_OTHER};
+
+// Test orchestration context
+enum mode         {modeNotSet, CDNS, CDNS_FALLBACK, FWD_GLOBAL, RECURSIVE};
+enum resolver     {resNotSet, BIND9, UNBOUND, KNOT, POWERDNS, TECHNITIUM, MARADNS};
+
+// ---------------- Integers ----------------
+int q_id;               // query ID
+int resp_id;            // response ID
+int ancount;            // answer count in response
+int nscount;            // ns count
+int arcount;            // additional count
+int resp_min_ttl;       // min TTL observed in returned RRsets (or -1 if none)
+int prev_negative_ttl;  // from previous NXDOMAIN reply (seconds), -1 if none
+int time_since_prev;    // seconds since previous same (name,type) query
+int resp_port;          // source port used in response
+int unit_no;            // RF unit index
+int round_no;           // RF round index
+int cache_min_ttl;      // min TTL found in cache for (name,type) this round (−1 if none)
+
+// ---------------- Booleans ----------------
+// Core DNS semantics
+bool resp_tc;                  // TC flag (truncated)
+bool resp_ad;                  // AD flag (authentic data)
+bool resp_do;                  // DO bit observed in response
+bool query_do;                 // DO bit set in the client's query
+bool resp_aa;                  // AA (authoritative) flag set
+bool resp_malformed;           // wire parsing error
+bool tcp_fallback_seen;        // client attempted TCP fallback
+bool timeout;                  // no response within window
+bool dnssec_present;           // valid DNSSEC material present
+bool opt_present;              // EDNS OPT present
+bool id_mismatch;              // resp_id != q_id
+bool server_behaved_nonidempotent; // contradictory AN/NS/AR across retry
+bool ttl_zero_exposed;         // any RR with TTL == 0 in answer
+bool resp_from_unexpected_port;// anti-spoof: response source port unexpected
+bool opt_padding_unusual;      // malformed/odd EDNS padding/options
+bool negative_cache_indicator; // NXDOMAIN + SOA (neg cache hint)
+bool any_ans_rrset_present;    // any answer rrset present (adapter aggregate)
+bool cname_loop_detected;      // CNAME loop detected
+bool auth_source_expected;     // adapter: response origin claimed authoritative
+
+// RF infrastructure observability
+bool query_payload_sent;         // query.txt present & parsed
+bool auth_payload_deployed;      // auth_payload.txt deployed to attacker NS
+
+// DNSTap
+bool dnstap_query_seen;          // client query observed
+bool dnstap_response_seen;       // matching response observed
+
+// Per-resolver PCAP
+bool pcap_udp_query_seen;        // UDP query from resolver container
+bool pcap_tcp_retry_seen;        // TCP fallback attempt seen
+bool pcap_response_seen;         // any response packet seen
+
+// Authoritative-side
+bool auth_ns_query_seen;         // resolver queried attacker-controlled auth
+bool auth_ns_response_seen;      // attacker auth responded
+bool auth_target_correct;        // target IP equals 172.22.201.[unit_no]
+
+// Forwarding behavior
+bool forwarder_query_seen;       // resolver forwarded to global forwarder (where allowed)
+bool unexpected_external_query;  // egress to unexpected IP ranges
+
+// response.txt / logs
+bool response_txt_present;       // response.txt parsed
+bool response_timeout_reported;  // response.txt says timeout
+bool response_tcp_used;          // response.txt indicates TCP was used
+bool log_error_seen;             // resolver log shows generic error
+bool log_tcp_fallback_decided;   // log shows TCP retry decision
+bool log_formerr_or_notimp;      // log shows FORMERR/NOTIMP
+
+// Caches
+bool cache_written;              // cache file updated this round
+bool cache_neg_present;          // negative cache entry present for name/type
+bool any_cache_rrset_present;    // any rrset present in cache this round
+
+// ========================= Logical Properties (H(...)) ================
+
+// --- Base semantic rules (0–26) ---
+
+// 00 — Only require equality when both IDs are known
+H( (q_id > 0 & resp_id > 0) -> resp_id = q_id );
+
+// Keep strict malformed
+// 01
+H( resp_malformed = false );
+
+// 02, 03 unchanged
+H( rcode = NXDOMAIN -> ancount = 0 );
+H( ancount > 0 -> rcode = NOERROR );
+
+// 04 — Truncation implies corroborated TCP fallback attempt/decision
+H( (q_transport = UDP & resp_tc = true) ->
+    O( pcap_tcp_retry_seen = true | log_tcp_fallback_decided = true | response_tcp_used = true ) );
+
+// 05, 06 unchanged
+H( (query_do = true & resp_ad = true) -> dnssec_present = true );
+H( resp_ad = true -> dnssec_present = true );
+
+// 07 — AA allowed if (answers|NS) OR we actually targeted attacker auth
+H( resp_aa = true -> (nscount > 0 | ancount > 0 | (auth_ns_query_seen = true & auth_target_correct = true)) );
+
+// 08 — “timeout” only if no response seen anywhere
+H( timeout = true -> (rcode = rcNotSet & ancount = 0 & resp_malformed = false
+                      & pcap_response_seen = false & dnstap_response_seen = false) );
+
+// 09 unchanged
+H( (rcode = NXDOMAIN & negative_cache_indicator = true & prev_negative_ttl >= 0) ->
+    ( time_since_prev <= prev_negative_ttl -> rcode = NXDOMAIN ) );
+
+// 10 — Only complain about NXDOMAIN-after-answers when answers were real and NOERROR
+H( (any_ans_rrset_present = true & rcode = NOERROR & pcap_response_seen = true) ->
+    !( O( rcode = NXDOMAIN ) ) );
+
+// 11 unchanged
+H( resp_from_unexpected_port = false );
+
+// 12 — After UDP+TC and fallback, next response should be same ID & not TC
+H( (Y( O( q_transport = UDP & resp_tc = true )) & O( (pcap_tcp_retry_seen = true | response_tcp_used = true) )) ->
+    O( ( (q_id > 0 & resp_id > 0) -> resp_id = q_id ) & resp_tc = false ) );
+
+// 13 unchanged
+H( (rcode = NOERROR & ancount = 0) -> ( nscount > 0 | arcount > 0 | any_ans_rrset_present = false ) );
+
+// 15 unchanged
+H( Y(O(rcode = NOERROR)) -> !( O( rcode = NXDOMAIN ) ) );
+
+// 16 unchanged
+H( ttl_zero_exposed = true -> !( O( resp_min_ttl > 0 ) & any_ans_rrset_present = true ) );
+
+// 17 — Do not require EDNS in the response merely because query had DO
+H( (query_do = true) -> (opt_present = true | resp_do = true | resp_ad = true | ancount = 0) );
+
+// 18, 19 unchanged
+H( rcode = REFUSED -> !( O( rcode = NOERROR ) ) );
+H( !(resp_ad = true & dnssec_present = false) );
+
+// 20 — Only enforce ID equality when both IDs known
+H( (q_transport = TCP & Y( O( q_transport = UDP ) )) ->
+    ( (q_id > 0 & resp_id > 0) -> resp_id = q_id ) & server_behaved_nonidempotent = false );
+
+// 21, 22, 23 unchanged
+H( cname_loop_detected = false );
+H( (q_type = DNSSEC | q_type = OTHER) -> (q_transport = TCP | q_transport = UDP) );
+H( (resp_do = true & dnssec_present = true) -> (resp_ad = true | resp_ad = false) );
+
+// 24 unchanged (alignment via rr_kind)
+H( any_ans_rrset_present = true ->
+    ( (q_type = A     & rr_kind = RR_A)
+    | (q_type = AAAA  & rr_kind = RR_AAAA)
+    | (q_type = CNAME & rr_kind = RR_CNAME)
+    | (q_type = NS    & rr_kind = RR_NS)
+    | (q_type = MX    & rr_kind = RR_MX)
+    | (q_type = TXT   & rr_kind = RR_OTHER)
+    | (q_type = ANY)
+    | (q_type = OTHER) ) );
+
+// 25, 26 unchanged
+H( rcode = FORMERR -> (ancount = 0 & dnssec_present = false) );
+H( O( rcode = NOERROR ) -> !( O( rcode = NXDOMAIN ) ) );
+
+// Optional strictness — only if both IDs known
+H( (q_id > 0 & resp_id > 0) -> id_mismatch = false );
+
+// --- Infrastructure-aware rules ---
+
+// 27 — DNStap optional: require *some* corroboration if we sent a query
+H( query_payload_sent = true );
+H( query_payload_sent = true -> (dnstap_query_seen = true | pcap_udp_query_seen = true) );
+
+// 28 unchanged (already strict)
+H( response_timeout_reported = true -> (pcap_response_seen = false & dnstap_response_seen = false) );
+
+// 29 — corroborate fallback path (same as 04)
+H( (q_transport = UDP & resp_tc = true) ->
+    (pcap_tcp_retry_seen = true | log_tcp_fallback_decided = true | response_tcp_used = true) );
+
+// 30 — FWD_GLOBAL: forwarder seen OR legit failure path
+H( mode = FWD_GLOBAL ->
+   ( forwarder_query_seen = true
+     | response_timeout_reported = true
+     | rcode = SERVFAIL | rcode = FORMERR | rcode = REFUSED ) );
+
+// 31 — RECURSIVE: must hit our auth unless legitimate failure
+H( mode = RECURSIVE ->
+   ( (auth_ns_query_seen = true & auth_target_correct = true)
+     | response_timeout_reported = true
+     | rcode = SERVFAIL | rcode = FORMERR ) & forwarder_query_seen = false );
+
+// 32 — CDNS: must hit our auth unless legitimate failure
+// 32 — CDNS: must hit our auth unless it clearly failed; ignore inconclusive “no-response” rounds
+H( mode = CDNS ->
+   (
+     (auth_ns_query_seen = true & auth_target_correct = true)
+     | response_timeout_reported = true
+     | rcode = SERVFAIL | rcode = FORMERR
+     | (pcap_response_seen = false & rcode = rcNotSet) // inconclusive
+   )
+   & ( (pcap_response_seen = false & rcode = rcNotSet)  // in inconclusive case, don't punish forwarding
+       | forwarder_query_seen = false )
+);
+
+// 33 — CDNS_FALLBACK: either stay local, or fail in controlled ways
+H( mode = CDNS_FALLBACK ->
+   ( forwarder_query_seen = false
+     | response_timeout_reported = true
+     | rcode = SERVFAIL | rcode = FORMERR ) );
+
+// 34 — If a response file says “we got a response”, corroborate with PCAP or DNStap
+H( (response_txt_present = true & response_timeout_reported = false) ->
+    (pcap_response_seen = true | dnstap_response_seen = true) );
+
+// 35 unchanged
+H( unexpected_external_query = false );
+
+// 36 — Only if AA, we should have queried auth (as 07 already tightened)
+H( (resp_aa = true) -> auth_ns_query_seen = true );
+
+// 37, 38 — keep but adapter already tightened “written/any_rrset”
+H( (rcode = NOERROR & ancount > 0) -> cache_written = true );
+H( (rcode = NOERROR & ancount > 0) -> any_cache_rrset_present = true );
+
+// 39, 40 unchanged
+H( (rcode = NXDOMAIN & negative_cache_indicator = true) -> cache_neg_present = true );
+H( cache_written = true -> (cache_min_ttl >= 0) );
+
+// 41 unchanged
+H( log_formerr_or_notimp = true -> rcode != NOERROR );
+
+// 42 — Only force “not TC” if we saw no TCP fallback decision/attempt
+H( (pcap_tcp_retry_seen = false & log_tcp_fallback_decided = false) -> resp_tc = false );
+
+// 43, 44 unchanged
+H( dnstap_response_seen = true -> response_txt_present = true );
+H( auth_ns_query_seen = true -> auth_target_correct = true );
+
+// 45 — In CDNS, once our auth answered, we must not forward
+H( (mode = CDNS & auth_ns_response_seen = true) -> forwarder_query_seen = false );
+
+// 46 unchanged
+H( (log_tcp_fallback_decided = true & pcap_tcp_retry_seen = false) -> response_timeout_reported = true );
+
+// 47 — Only assert “not TC” after TCP if we actually saw TCP retry
+H( pcap_tcp_retry_seen = true -> resp_tc = false );
+
+// 48 unchanged
+H( !(dnstap_query_seen = true & dnstap_response_seen = false & response_timeout_reported = false) );
+
+// 49 — Only require PCAP response when there are answers and NOERROR
+H( (rcode = NOERROR & ancount > 0) -> pcap_response_seen = true );

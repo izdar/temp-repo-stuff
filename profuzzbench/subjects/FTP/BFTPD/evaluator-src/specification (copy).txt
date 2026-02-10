@@ -1,0 +1,127 @@
+enum request {requestNotSet, client_commit_success, client_commit_bad, client_commit_error, client_commit_reuse, unknown, client_confirm_error, client_commit_reflect, client_confirm_success, client_confirm_bad, association_request, client_commit_success_ac_token, client_commit_ac_token};
+enum response {responseNotSet, ap_commit_success, timeout, ap_commit_error, ap_commit_reuse, ap_confirm_error, ap_confirm_success, association_response, ap_commit_ac_token};
+enum support {supportNotSet, supported, unsupported};
+int client_status_code;
+int ap_status_code;
+int ap_group;
+int group;
+int ap_send_confirm;
+int send_confirm;
+bool rg_container;
+bool ac_container;
+bool pi_container;
+bool ap_pi_container;
+bool ap_pi;
+bool ac;
+bool pi;
+
+(request!=requestNotSet & response!=responseNotSet) -> H (
+    (
+        (request=client_commit_success | request=client_commit_bad) -> ! response=timeout
+    ) 
+    |
+    (
+        (request=client_commit_success & rg_container=true & support=supported) -> response=timeout
+    )
+);
+
+(request!=requestNotSet & response!=responseNotSet) -> H (
+    (request=client_commit_success | request=client_commit_bad) -> !response=timeout 
+);
+
+(request!=requestNotSet & response!=responseNotSet) -> H (
+    response=ap_confirm_success -> (O request=client_commit_success) & (O response=ap_commit_success)
+);
+
+(request!=requestNotSet & response!=responseNotSet) -> H (
+    response=association_response -> O (request=client_confirm_success)
+);
+
+(request!=requestNotSet & response!=responseNotSet) -> H (
+    (request=client_commit_reuse & O (response=association_response)) -> response=timeout
+);
+
+(request!=requestNotSet & response!=responseNotSet) -> H (
+    ((O response=ap_commit_ac_token) & request=client_commit_success_ac_token) -> response=ap_commit_success);
+
+(request!=requestNotSet & response!=responseNotSet) -> H (
+    ((O response=ap_commit_ac_token) & request=client_commit_success) -> response=timeout
+);
+
+(request!=requestNotSet & response!=responseNotSet & client_status_code!=100) -> H (
+    ((client_status_code != 0 & client_status_code != 126) & (request=client_commit_success | request=client_commit_error)) -> response=timeout
+);
+
+(request!=requestNotSet & response!=responseNotSet & group!=100 & client_status_code!=100) -> H (
+    ((client_status_code = 0 | client_status_code = 126) & (group < 19 | group > 21))
+    -> (response=ap_commit_error & ap_status_code=77)
+);
+
+(request!=requestNotSet & response!=responseNotSet & group!=100 & ap_group!=100 & client_status_code!=100) -> H (
+    ((request=client_commit_error | request=client_commit_bad | request=client_commit_success) & client_status_code=77 & group != ap_group)
+    -> response=timeout
+);
+
+(request!=requestNotSet & response!=responseNotSet & group!=100 & ap_group!=100 & client_status_code!=100) -> H (
+    ((request=client_commit_error | request=client_commit_bad | request=client_commit_success) & client_status_code=77 & group = ap_group)
+    -> 
+    (response=timeout | (response=ap_commit_success & ap_group >= 19 & ap_group <= 21))
+);
+
+(request!=requestNotSet & response!=responseNotSet & group!=100 & ap_group!=100 & client_status_code!=100) -> H (
+    ((request=client_commit_error | request=client_commit_bad | request=client_commit_success) & client_status_code=77 & group = ap_group)
+    -> 
+    (response=ap_commit_success & ap_group >= 19 & ap_group <= 21)
+);
+
+(request!=requestNotSet & response!=responseNotSet) -> H (
+    (request=client_commit_reflect & O (response=ap_commit_success)) -> response=timeout
+);
+
+(request!=requestNotSet & response=responseNotSet) -> H (
+    request=client_commit_reflect -> response=timeout
+);
+
+(request!=requestNotSet & response!=responseNotSet & group!=100 & ap_group!=100) -> H (
+    (O (response=ap_commit_success) & (request=client_commit_success & group=ap_group))
+    -> response=ap_commit_success
+);
+
+(request!=requestNotSet & response!=responseNotSet & ap_send_confirm!=-1) -> H (
+    ((O response=ap_commit_success) & request=client_confirm_success) -> 
+        (response=ap_confirm_success & ap_send_confirm = 65535)
+);
+
+(response!=responseNotSet & request!=requestNotSet & send_confirm!=-1 & ap_send_confirm!=-1) -> H (
+    ((O response=ap_commit_success) & request=client_confirm_success &
+    send_confirm=65535)
+    -> response=timeout
+);
+
+(response!=responseNotSet & request!=requestNotSet & send_confirm!=-1 & ap_send_confirm!=-1) -> H (
+    ((O response=ap_confirm_success) & request=client_confirm_success &
+    (send_confirm < 65535 | send_confirm >= ap_send_confirm))
+    -> (response=ap_confirm_success & ap_send_confirm = 65535)
+);
+
+(request!=requestNotSet & response!=responseNotSet) -> H (
+    (client_status_code=126 & (request=client_commit_success | request=client_commit_error | request=client_commit_bad))
+    -> (ap_status_code=126 & (response=ap_commit_ac_token | response=ap_commit_success | response=ap_commit_error))
+);
+
+(request!=requestNotSet & response!=responseNotSet) -> H (
+    (request=client_commit_success & pi_container=true) -> (response=ap_commit_error & ap_status_code=123)
+);
+
+(request!=requestNotSet & response!=responseNotSet & support!=supportNotSet) -> H (
+    (request=client_commit_success & rg_container=true & support=unsupported) -> 
+    (response=timeout | response=ap_commit_error)
+);
+
+(request!=requestNotSet & response!=responseNotSet) -> H (
+    ((O response=ap_commit_ac_token) & request=client_commit_success & client_status_code=126) -> (ac_container=true & ac=true)
+);
+
+(request!=requestNotSet & response!=responseNotSet) -> H (
+        ((O response=ap_commit_ac_token) & request=client_commit_success_ac_token & client_status_code=0) -> (ac_container=false)
+);

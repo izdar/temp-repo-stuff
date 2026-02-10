@@ -1,0 +1,322 @@
+/*
+  ssh_semantics_reqresp.ltl
+
+  Robust SSH semantic runtime spec for request/response pairs.
+
+  - Uses ADT enums `request` and `response` for I/O events.
+  - Uses only observable fields + simple monitor-maintained counters.
+  - Targets semantic bugs in:
+      * KEX / NEWKEYS / crypto usage
+      * Authentication and auth methods
+      * Channel open/data/close discipline
+      * Global requests and unimplemented responses
+      * Disconnect behavior (carefully, to avoid FPs)
+*/
+
+/* --------------------------
+   ADT enums: request / response kinds
+   -------------------------- */
+
+enum request {
+  requestNotSet,
+
+  /* Transport / KEX requests (client->server) */
+  c2s_kexinit,
+  c2s_kexdh_init,
+  c2s_kex_ecdh_init,
+  c2s_newkeys_request,         /* client NEWKEYS */
+
+  /* Service & Auth requests (client->server) */
+  c2s_service_request_userauth,
+  c2s_userauth_request,        /* USERAUTH_REQUEST (method encoded elsewhere) */
+
+  /* Channel requests (client->server) */
+  c2s_channel_open,
+  c2s_channel_window_adjust,
+  c2s_channel_data,
+  c2s_channel_eof,
+  c2s_channel_close,
+  c2s_channel_request,
+  c2s_global_request,
+
+  /* Misc */
+  c2s_disconnect,
+  c2s_unimplemented,
+  c2s_debug
+};
+
+enum response {
+  responseNotSet,
+
+  /* Transport / KEX responses (server->client) */
+  s2c_kexinit,
+  s2c_kexdh_reply,
+  s2c_kex_ecdh_reply,
+  s2c_newkeys_response,       /* server NEWKEYS */
+
+  /* Service & Auth responses (server->client) */
+  s2c_service_accept_userauth,
+  s2c_userauth_failure,
+  s2c_userauth_success,
+  s2c_userauth_banner,
+
+  /* Channel responses (server->client) */
+  s2c_channel_open_confirmation,
+  s2c_channel_open_failure,
+  s2c_channel_window_adjust,
+  s2c_channel_data,
+  s2c_channel_eof,
+  s2c_channel_close,
+  s2c_channel_request_response,
+  s2c_global_request_response,
+
+  /* Misc */
+  s2c_disconnect,
+  s2c_unimplemented,
+  s2c_debug
+};
+
+/* --------------------------
+   Per-event scalar flags (monitor sets for current event)
+   -------------------------- */
+
+bool encrypted;          /* packet is encrypted on the wire */
+bool mac_ok;             /* MAC (or AEAD tag) validated for this packet */
+bool hostkey_present;    /* KEX reply included hostkey blob */
+bool sig_ok;             /* KEX reply signature validated */
+
+int  pkt_len;            /* total SSH packet_length */
+int  pad_len;            /* padding length field from packet */
+int  chan_data_len;      /* channel data length for this event (0 otherwise) */
+
+int  auth_attempts;      /* cumulative auth attempts so far (monitor-maintained) */
+bool is_auth_method_none;/* last USERAUTH_REQUEST used "none" */
+
+/* Optional violation reporting hooks (not used in formulas but available) */
+bool report_violation;
+int  violation_code;
+
+/* =========================================================
+   Past-time LTL Properties over Request–Response Sequences
+   ========================================================= */
+
+/* --------------------------
+   1x — KEX / NEWKEYS ordering and hostkey semantics
+   -------------------------- */
+
+/* 1) Every server NEWKEYS must be preceded by both client and server KEXINIT. */
+H(
+  response = s2c_newkeys_response ->
+    ( O(request = c2s_kexinit) & O(response = s2c_kexinit) )
+)
+
+/* 2) Any KEX reply must include a hostkey and a valid signature. */
+H(
+  (response = s2c_kexdh_reply | response = s2c_kex_ecdh_reply) ->
+    ( hostkey_present = true & sig_ok = true )
+)
+
+/* 3) Server NEWKEYS must be preceded by a KEXDH / ECDH init from client
+      (i.e., NEWKEYS without a prior key-exchange init is suspicious). */
+H(
+  response = s2c_newkeys_response ->
+    O(request = c2s_kexdh_init | request = c2s_kex_ecdh_init)
+)
+
+/* --------------------------
+   2x — Post-NEWKEYS crypto discipline
+   -------------------------- */
+
+/* Helper pattern: "after both NEWKEYS have occurred" – we encode this
+   using S ("since") so that from that point on, a predicate must hold. */
+
+/* 4) After both NEWKEYS (client request + server response), all subsequent
+      packets (requests or responses) must be encrypted. */
+H(
+  encrypted = true S (
+    (request = c2s_newkeys_request & O(response = s2c_newkeys_response)) |
+    (response = s2c_newkeys_response & O(request = c2s_newkeys_request))
+  )
+)
+
+/* 5) After both NEWKEYS, all subsequent packets must have valid MACs. */
+H(
+  mac_ok = true S (
+    (request = c2s_newkeys_request & O(response = s2c_newkeys_response)) |
+    (response = s2c_newkeys_response & O(request = c2s_newkeys_request))
+  )
+)
+
+/* 6) Padding sanity: for any well-formed packet, pad_len must be within
+      a coarse but safe range and strictly less than pkt_len.
+      This is conservative and has low FP on real stacks. */
+H(
+  pkt_len > 0 ->
+    ( pad_len >= 4 & pad_len < 256 & pkt_len > pad_len )
+)
+
+/* --------------------------
+   3x — Service and authentication semantics
+   -------------------------- */
+
+/* 7) Service-accept(userauth) must follow a prior service-request(userauth). */
+H(
+  response = s2c_service_accept_userauth ->
+    O(request = c2s_service_request_userauth)
+)
+
+/* 8) USERAUTH_SUCCESS must follow some USERAUTH_REQUEST. */
+H(
+  response = s2c_userauth_success ->
+    O(request = c2s_userauth_request)
+)
+
+/* 9) USERAUTH_SUCCESS must not appear before the rekey/NEWKEYS
+      handshake completed (both directions). */
+H(
+  response = s2c_userauth_success ->
+    ( O(request = c2s_newkeys_request) & O(response = s2c_newkeys_response) )
+)
+
+/* 10) USERAUTH_SUCCESS with zero prior auth attempts is suspicious
+       (indicates auth bypass or implicit acceptance). */
+H(
+  response = s2c_userauth_success ->
+    ( auth_attempts > 0 )
+)
+
+/* 11) USERAUTH_SUCCESS must not be produced in response to method "none". */
+H(
+  response = s2c_userauth_success ->
+    ( is_auth_method_none = false )
+)
+
+/* 12) After NEWKEYS, all userauth messages (both directions)
+       must be encrypted (confidentiality of auth). */
+H(
+  (request = c2s_userauth_request |
+   response = s2c_userauth_failure |
+   response = s2c_userauth_success) ->
+    (
+      ( O(request = c2s_newkeys_request) & O(response = s2c_newkeys_response) )
+      -> encrypted = true
+    )
+)
+
+/* --------------------------
+   4x — Channel open / data / close discipline
+   -------------------------- */
+
+/* 13) Channel open confirmation must follow a channel open request. */
+H(
+  response = s2c_channel_open_confirmation ->
+    O(request = c2s_channel_open)
+)
+
+/* 14) Channel open failure must follow a channel open request. */
+H(
+  response = s2c_channel_open_failure ->
+    O(request = c2s_channel_open)
+)
+
+/* 15) No channel data response should be observed unless an open+confirm
+       pair occurred earlier (basic channel establishment discipline). */
+H(
+  response = s2c_channel_data ->
+    ( O(request = c2s_channel_open) & O(response = s2c_channel_open_confirmation) )
+)
+
+/* 16) No channel data request should be sent by client after it has
+       previously sent a channel_close on that channel.  This is a pure
+       past-time constraint; per-channel scoping is handled by adapter. */
+H(
+  request = c2s_channel_data ->
+    !O(request = c2s_channel_close)
+)
+
+/* 17) If the client has sent channel_close earlier, server should not
+       later send channel_data responses (data-after-close). */
+H(
+  response = s2c_channel_data ->
+    !O(request = c2s_channel_close)
+)
+
+/* 18) Window-adjust responses must be preceded by open+confirm in the past. */
+H(
+  response = s2c_channel_window_adjust ->
+    ( O(request = c2s_channel_open) & O(response = s2c_channel_open_confirmation) )
+)
+
+/* 19) Channel data lengths in responses must be positive. */
+H(
+  response = s2c_channel_data ->
+    ( chan_data_len > 0 )
+)
+
+/* 20) A channel EOF request should eventually be followed by a
+       channel_close request or response before *further* data.
+       We encode only the requirement that close must appear later. */
+H(
+  request = c2s_channel_eof ->
+    ( O(request = c2s_channel_close) | O(response = s2c_channel_close) )
+)
+
+/* --------------------------
+   5x — Global requests and UNIMPLEMENTED
+   -------------------------- */
+
+/* 21) UNIMPLEMENTED responses should correspond to some prior request
+       (global/channel), not appear spontaneously. */
+H(
+  response = s2c_unimplemented ->
+    O(request = c2s_global_request | request = c2s_channel_request)
+)
+
+/* 22) Global request responses must follow some global request. */
+H(
+  response = s2c_global_request_response ->
+    O(request = c2s_global_request)
+)
+
+/* --------------------------
+   6x — Disconnect semantics (carefully tuned)
+   -------------------------- */
+
+/* 23) A server DISCONNECT occurring *after* NEWKEYS should not be the very
+       first server response after keys are set; we expect at least some
+       auth- or service-related feedback before a clean disconnect.
+       This avoids flagging early handshake failures as bugs. */
+H(
+  (response = s2c_disconnect &
+   O(response = s2c_newkeys_response)) ->
+     O(response = s2c_userauth_failure |
+       response = s2c_userauth_banner |
+       response = s2c_userauth_success |
+       response = s2c_service_accept_userauth)
+)
+
+/* 24) Repeated service-accept(userauth) responses without an intervening
+       disconnect or rekey are suspicious. This targets weird state reuse
+       in the auth layer while allowing normal rekeying/teardown. */
+H(
+  response = s2c_service_accept_userauth ->
+    !O(
+      response = s2c_service_accept_userauth &
+      !( request = c2s_disconnect |
+         response = s2c_disconnect |
+         request = c2s_newkeys_request |
+         response = s2c_newkeys_response )
+    )
+)
+
+/* --------------------------
+   7x — MAC validity after NEWKEYS (redundant but strong)
+   -------------------------- */
+
+/* 25) Once both NEWKEYS have happened, any packet with invalid MAC
+       is a violation. This overlaps with (5) but is expressed in a
+       clearer implication style. */
+H(
+  ( O(request = c2s_newkeys_request) & O(response = s2c_newkeys_response) ) ->
+    ( mac_ok = true )
+)

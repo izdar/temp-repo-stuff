@@ -1,0 +1,127 @@
+// RTSP SPEC - Desync-Proof
+// All cross-reference rules guarded by cseq_match=true to prevent
+// false positives from request/response CSeq desynchronization.
+// The fuzzer pipelines requests faster than the server responds,
+// so without cseq_match guard, response properties get evaluated
+// against the wrong request's method/state.
+
+enum rtsp_method {
+    mNotSet,
+    mOPTIONS,
+    mDESCRIBE,
+    mSETUP,
+    mPLAY,
+    mPAUSE,
+    mTEARDOWN,
+    mANNOUNCE,
+    mGET_PARAMETER,
+    mSET_PARAMETER,
+    mREDIRECT,
+    mRECORD
+};
+
+enum status_class {
+    scNotSet,
+    scINFO,
+    scSUCCESS,
+    scREDIRECT,
+    scCLIENT_ERR,
+    scSERVER_ERR
+};
+
+int req_cseq;
+int resp_cseq;
+int resp_status_code;
+
+bool req_malformed;
+bool resp_malformed;
+bool cseq_match;
+bool resp_has_session;
+bool session_established;
+bool timeout;
+
+bool req_has_session;
+bool session_id_match;
+bool session_id_changed;
+bool teardown_for_existing_session;
+bool teardown_without_session;
+bool transport_req_udp;
+bool transport_req_tcp;
+bool transport_resp_udp;
+bool transport_resp_tcp;
+bool transport_client_ports_present;
+bool transport_server_ports_present;
+
+int setup_success_count;
+int play_success_count;
+bool all_tracks_setup;
+bool keepalive_getparam;
+bool keepalive_failed;
+
+// New observables for fuzzer-discovered bug detection:
+bool transport_resp_port_zero;   // Response Transport contains a port value of 0
+bool resp_cseq_valid;            // Response CSeq field is a valid decimal integer
+bool req_uri_in_session;         // Request URI was SETUPed within current session
+bool resp_empty;                 // Server sent a zero-length response
+
+// ========== SECURITY BUGS (Rules 1-6) ==========
+
+// RULE 1: Status Class Mismatch (response-only, no cseq guard needed)
+//H((timeout=false & resp_malformed=false & status_class=scSUCCESS) -> (resp_status_code>=200 & resp_status_code<300));
+
+// RULE 2: PLAY Without Session Establishment
+//H((timeout=false & resp_malformed=false & cseq_match=true & rtsp_method=mPLAY & rtsp_method!=mNotSet & req_cseq>0 & session_established=false) -> (status_class!=scSUCCESS));
+
+// RULE 3: TEARDOWN Without Session
+//H((timeout=false & resp_malformed=false & cseq_match=true & rtsp_method=mTEARDOWN & rtsp_method!=mNotSet & req_cseq>0 & teardown_without_session=true) -> !(status_class=scSUCCESS));
+
+// RULE 4: Session ID Changed During Session
+//H((timeout=false & resp_malformed=false & cseq_match=true & rtsp_method!=mNotSet & req_cseq>0 & session_established=true) -> (session_id_changed=false));
+
+// RULE 5: Session ID Mismatch for PLAY/TEARDOWN
+//H((timeout=false & resp_malformed=false & cseq_match=true & rtsp_method!=mNotSet & req_cseq>0 & session_established=true & req_has_session=true & (rtsp_method=mPLAY | rtsp_method=mTEARDOWN)) -> (session_id_match=true));
+
+// RULE 6: TEARDOWN Must Reference Existing Session
+//H((timeout=false & resp_malformed=false & cseq_match=true & rtsp_method=mTEARDOWN & rtsp_method!=mNotSet & req_cseq>0 & status_class=scSUCCESS) -> (teardown_for_existing_session=true));
+
+// ========== IMPLEMENTATION BUGS (Rules 7-12) ==========
+
+// RULE 7: Successful SETUP Missing Session Header
+//H((timeout=false & resp_malformed=false & cseq_match=true & rtsp_method=mSETUP & rtsp_method!=mNotSet & req_cseq>0 & status_class=scSUCCESS) -> (resp_has_session=true));
+
+// RULE 8: Session Header on Non-Success Response
+//H((timeout=false & resp_malformed=false & cseq_match=true & rtsp_method!=mNotSet & req_cseq>0 & resp_has_session=true) -> (status_class=scSUCCESS));
+
+// RULE 9: UDP Request Gets TCP Response
+//H((timeout=false & resp_malformed=false & cseq_match=true & rtsp_method=mSETUP & rtsp_method!=mNotSet & req_cseq>0 & status_class=scSUCCESS & transport_req_udp=true) -> (transport_resp_tcp=false));
+
+// RULE 10: TCP Request Gets Non-TCP Response
+//H((timeout=false & resp_malformed=false & cseq_match=true & rtsp_method=mSETUP & rtsp_method!=mNotSet & req_cseq>0 & status_class=scSUCCESS & transport_req_tcp=true) -> (transport_resp_tcp=true));
+
+// RULE 11: UDP Response Missing Server Ports
+//H((timeout=false & resp_malformed=false & cseq_match=true & rtsp_method=mSETUP & rtsp_method!=mNotSet & req_cseq>0 & status_class=scSUCCESS & transport_resp_udp=true) -> (transport_server_ports_present=true));
+
+// RULE 12: PLAY Count Exceeds SETUP Count (counters affected by desync too)
+//H((timeout=false & resp_malformed=false & cseq_match=true & rtsp_method!=mNotSet) -> (play_success_count<=setup_success_count));
+
+// RULE 13: Successful SETUP Must Not Produce Zero-Value Ports
+// Catches: corrupted Transport header silently accepted by LIVE555,
+// server assigns client_port=0-1 server_port=0-0 instead of rejecting.
+// Port 0 is reserved; RTP delivery will never work.
+((timeout=false & resp_malformed=false & cseq_match=true & rtsp_method=mSETUP & rtsp_method!=mNotSet & req_cseq>0 & status_class=scSUCCESS) -> (transport_resp_port_zero=false));
+
+// RULE 14: Response CSeq Must Be Valid Decimal Integer
+// Catches: server echoing unparseable bytes as CSeq value when fuzzer
+// corrupts CSeq field (e.g. "Date:", "+P: ./testRTI", "r-R").
+// RFC 2326 s12.17: CSeq = "CSeq" ":" 1*DIGIT.
+((timeout=false & resp_malformed=false & resp_empty=false) -> (resp_cseq_valid=true));
+
+// RULE 15: Successful Session Operations Must Target SETUPed Streams
+// Catches: cross-stream confusion where PLAY/TEARDOWN for a URI never
+// SETUPed in this session gets 2xx success. Server must validate that
+// the request URI belongs to a stream SETUPed under the active session.
+((timeout=false & resp_malformed=false & cseq_match=true & req_cseq>0 & session_established=true & status_class=scSUCCESS & (rtsp_method=mPLAY | rtsp_method=mTEARDOWN)) -> (req_uri_in_session=true));
+
+// RULE 16: Server Must Not Send Empty Responses
+// Catches: zero-length responses to valid requests with no error indication.
+((timeout=false & req_malformed=false & req_cseq>0) -> (resp_empty=false));

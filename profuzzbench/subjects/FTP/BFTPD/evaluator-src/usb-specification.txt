@@ -1,0 +1,275 @@
+/*
+  usbpd_reqresp_core_properties.ltl
+
+  USB Power Delivery (USB-PD) request/response runtime monitoring properties.
+  - Single self-contained file with ADT enums, per-message scalars, and past-time LTL properties.
+  - Monitor must set exactly one msg = <Ctor> for each observed PD message event,
+    and set the per-message scalars from the parsed PD message.
+  - All properties use only past-time operators (H, O, Y, S) and reason over I/O events.
+  - A violation reported by the monitor (setting report_violation + violation_code)
+    should indicate a real logical or security/safety bug requiring remediation.
+
+  This file was written with reference to the FUZZPD USBPD fuzzing paper for core flows
+  and typical functional sequences. See: :contentReference[oaicite:0]{index=0}
+*/
+
+/* ================
+   ADT: PD message kinds
+   ================ */
+enum msg {
+  MSG_NotSet,
+
+  /* Control messages / standard sequence */
+  SRC_CAP,        /* Source Capabilities (source -> sink) */
+  GET_SRC_CAP,    /* Query source capabilities (sink -> source) */
+  REQUEST,        /* Sink requests power (sink -> source) */
+  ACCEPT,         /* Source accepts a REQUEST (source -> sink) */
+  REJECT,         /* Source rejects a REQUEST (source -> sink) */
+  PS_RDY,         /* Power supply ready (source -> sink) */
+  GET_STATUS,     /* Get status (either) */
+  STATUS,         /* Status response */
+  SOFT_RESET,     /* Soft Reset control */
+  HARD_RESET,     /* Hard Reset control (critical safety event) */
+  VENDOR_DEFINED, /* VDMs (vendor-defined messages) */
+  GET_BAT_CAP,    /* Battery capability query */
+  GET_BAT_STATUS, /* Battery status */
+  ALERT,          /* Alert (error/safety) */
+  PR_SWAP,        /* Power Role Swap request */
+  PR_SWAP_ACCEPT, /* Power Role Swap accept */
+  PR_SWAP_REJECT, /* Power Role Swap reject */
+  PS_RDY2,        /* PS_RDY after role-swap or special flows */
+  GET_SRC_CAP_EXT /* extended source cap request */
+};
+
+/* ================
+   ADT: role of the local endpoint at time of event
+   ================ */
+enum role {
+  ROLE_NotSet,
+  ROLE_Source,
+  ROLE_Sink,
+  ROLE_Dual
+};
+
+/* =========================
+   Per-message observable scalars
+   ========================= */
+
+/* Direction: true if the message was sent by the fuzzer-under-test (local device),
+   false if received from peer */
+bool msg_from_local;
+
+/* PD parameter fields (set when message contains these fields) */
+/* Values are integer units (mV / mA / mW) or counts as appropriate. */
+int  pdo_count;               /* number of PDOs in most recent SRC_CAP */
+int  offered_max_voltage_mV;  /* highest voltage offered by last SRC_CAP (mV), -1 if unknown */
+int  offered_max_current_mA;  /* highest current (mA) available for selected PDO, -1 if unknown */
+int  requested_voltage_mV;    /* voltage asked in latest REQUEST (mV), -1 if not a REQUEST */
+int  requested_current_mA;    /* current asked in latest REQUEST (mA), -1 if not a REQUEST */
+int  rdo_object_pos;          /* RDO object position (1-based) in REQUEST, -1 if absent */
+bool rdo_unacceptable;        /* RDO indicates 'no acceptable' (e.g., object position invalid) */
+bool msg_crc_ok;              /* message integrity/CRC parse OK (control-level check) */
+bool msg_struct_valid;        /* syntactic/semantic validity at header level (basic) */
+bool vdm_present;             /* Vendor Defined Message present */
+int  vdm_cmd;                 /* vendor-defined command id (if VDM present), 0 if none */
+bool fw_update_cmd;           /* true if VDM indicates firmware-update / reflash command */
+bool ps_ready_expected;       /* true if a PS_RDY is expected after an ACCEPT in this sequence */
+int  pd_revision;             /* PD revision of the message (e.g., 2 or 3) */
+int  msg_seqnum;              /* message sequence number or counter if available, -1 if not */
+bool alert_overvoltage;       /* alert field indicates over-voltage condition */
+bool alert_overcurrent;       /* alert field indicates over-current condition */
+bool got_src_cap_ext;         /* true if GET_SRC_CAP_EXT succeeded recently */
+
+/* Monitor reporting fields (set by properties when a violation is detected) */
+bool report_violation;
+int  violation_code;         /* monitor-defined numeric code for the violation */
+
+/* ===========================
+   Core USB-PD request/response properties
+   (Each property wrapped with H(...) to assert it always held historically)
+   =========================== */
+
+/* P1: SRC_CAP (source advert) must appear before any REQUEST that selects from it */
+H(
+  (msg = REQUEST) -> O(msg = SRC_CAP)
+)
+
+/* P2: REQUEST must reference a valid object position and voltage within last SRC_CAP */
+H(
+  (msg = REQUEST) ->
+    ( rdo_object_pos >= 1 & rdo_object_pos <= pdo_count & requested_voltage_mV <= offered_max_voltage_mV )
+)
+
+/* P3: If REQUEST asks > offered_max_voltage or selects an out-of-range object,
+      then subsequent ACCEPT from the source is a logical bug (should be REJECT) */
+H(
+  (msg = REQUEST & (requested_voltage_mV > offered_max_voltage_mV | not (rdo_object_pos >= 1 & rdo_object_pos <= pdo_count)))
+  -> not O(msg = ACCEPT)
+)
+
+/* P4: If source sends ACCEPT, then PS_RDY must follow to indicate VBUS change completion */
+H(
+  (msg = ACCEPT) -> O(msg = PS_RDY | msg = PS_RDY2)
+)
+
+/* P5: If ACCEPT was seen but PS_RDY is not observed in the past within the expected sequence,
+      the monitor should flag (safety: VBUS may not be ready) */
+H(
+  msg = ACCEPT & not O(msg = PS_RDY | msg = PS_RDY2) -> ( report_violation & violation_code = 101 )
+)
+
+/* P6: If PS_RDY (or PS_RDY2 for role-swap flows) indicates power is ready, it must be preceded by ACCEPT
+      (or be part of an explicit role-swap acceptance flow) */
+H(
+  (msg = PS_RDY | msg = PS_RDY2) -> O(msg = ACCEPT | msg = PR_SWAP_ACCEPT)
+)
+
+/* P7: When a REQUEST is REJECTed (REJECT) the source must not subsequently emit PS_RDY for that request */
+H(
+  (msg = REJECT) -> not O(msg = PS_RDY)
+)
+
+/* P8: Corrupt or structurally invalid messages must not be accepted as valid transitions.
+      If msg_struct_valid=false and a later ACCEPT or PS_RDY is observed, flag violation. */
+H(
+  (msg_struct_valid = false) & O(msg = ACCEPT | msg = PS_RDY) -> ( report_violation & violation_code = 102 )
+)
+
+/* P9: Vendor-defined firmware-update commands (VDM with fw_update_cmd) must never be honored
+      without explicit out-of-band authentication — if fw_update_cmd seen and later device
+      accepts reflash (mode indicated via VDM accept), flag security violation. */
+H(
+  (vdm_present = true & fw_update_cmd = true) ->
+    not O(msg = ACCEPT) /* coarse: device should not accept firmware update via simple ACCEPT */
+)
+
+/* P10: Hard Reset must clear prior SRC_CAP/SOURCE selection state.
+      If HARD_RESET occurs and later PS_RDY/ACCEPT from prior sequence happens, flag. */
+H(
+  (msg = HARD_RESET) -> not O(msg = ACCEPT | msg = PS_RDY)
+)
+
+/* P11: Soft Reset must be followed by an SRC_CAP exchange (re-negotiation) before new REQUEST */
+H(
+  (msg = SOFT_RESET) -> O(msg = SRC_CAP)
+)
+
+/* P12: Power Role Swap (PR_SWAP) must be followed by explicit accept/reject before role-dependent messages:
+      If PR_SWAP seen, then PR_SWAP_ACCEPT or PR_SWAP_REJECT must appear before any role-specific messages (e.g., SRC_CAP from new source) */
+H(
+  msg = PR_SWAP -> O(msg = PR_SWAP_ACCEPT | msg = PR_SWAP_REJECT)
+)
+
+/* P13: If PR_SWAP_ACCEPT occurs, then the subsequent role-dependent SRC_CAP from the new source must be observed */
+H(
+  msg = PR_SWAP_ACCEPT -> O(msg = SRC_CAP)
+)
+
+/* P14: GET_SRC_CAP must be followed by SRC_CAP in response (or explicit rejection) */
+H(
+  msg = GET_SRC_CAP -> O(msg = SRC_CAP | msg = REJECT)
+)
+
+/* P15: GET_SRC_CAP_EXT should only succeed (got_src_cap_ext true) if prior SRC_CAP indicated support (pd_revision >= 3) */
+H(
+  (msg = GET_SRC_CAP_EXT & got_src_cap_ext = true) -> (pd_revision >= 3)
+)
+
+/* P16: If ALERT indicates over-voltage/over-current, then a HARD_RESET or safety mitigation must eventually occur */
+H(
+  (msg = ALERT & (alert_overvoltage | alert_overcurrent)) -> O(msg = HARD_RESET | msg = SOFT_RESET)
+)
+
+/* P17: Repeated ACCEPT without intervening REQUEST is suspicious (duplicate acceptance) */
+H(
+  msg = ACCEPT & Y(msg = ACCEPT) -> ( report_violation & violation_code = 103 )
+)
+
+/* P18: If a REQUEST indicates rdo_unacceptable (RDO says no object acceptable), source must not send PS_RDY */
+H(
+  (msg = REQUEST & rdo_unacceptable = true) -> not O(msg = PS_RDY)
+)
+
+/* P19: A PS_RDY without prior power-negotiation (no SRC_CAP and no ACCEPT) indicates unsafe hardware behaviour */
+H(
+  (msg = PS_RDY) -> ( O(msg = SRC_CAP) & O(msg = ACCEPT) )
+)
+
+/* P20: If msg_crc_ok=false for a received SRC_CAP, then using its offered values to accept a request is invalid */
+H(
+  (msg = SRC_CAP & msg_crc_ok = false) -> not O(msg = ACCEPT)
+)
+
+/* P21: REQUEST selecting beyond PD revision capabilities (e.g., requesting extended PDO fields when pd_revision < 3)
+      should be rejected; if accepted, flag violation */
+H(
+  (msg = REQUEST & pd_revision < 3 & /* monitor detects extended fields used */ vdm_present = true) ->
+    not O(msg = ACCEPT)
+)
+
+/* P22: GET_STATUS must be followed by a STATUS response within the transaction window (coarse: once) */
+H(
+  msg = GET_STATUS -> O(msg = STATUS)
+)
+
+/* P23: Multiple conflicting SRC_CAP messages (two different offered_max_voltage_mV values) without an intervening request/role-swap
+      may indicate non-deterministic behavior; flag for investigation */
+H(
+  msg = SRC_CAP & Y(msg = SRC_CAP & offered_max_voltage_mV != Y(offered_max_voltage_mV)) ->
+    ( report_violation & violation_code = 104 )
+)
+
+/* P24: VDMs that perform role-sensitive operations (e.g., VDM-based power commands) must be constrained by role: source-only VDMs
+      must not be accepted when msg_from_local indicates sink, and vice-versa. If contradiction occurs, flag. */
+H(
+  vdm_present = true & vdm_cmd > 0 & (role = ROLE_Sink) -> not O(msg = ACCEPT)
+)
+
+/* P25: Any REQUEST that asks for power > safe threshold (monitor-configured safety_limit_mV) must be rejected by source.
+      If ACCEPTed, report safety violation. (monitor should configure safety_limit_mV) */
+int safety_limit_mV; /* monitor-configurable threshold; set to -1 if unused */
+H(
+  (msg = REQUEST & requested_voltage_mV > safety_limit_mV & safety_limit_mV > 0) -> not O(msg = ACCEPT)
+)
+
+/* P26: Sequence coherence: a REQUEST should be followed (once) by either ACCEPT, REJECT or no-response (TIMEOUT).
+      If none ever occurred, the implementation might deadlock: flag after a reasonable past window. */
+H(
+  msg = REQUEST -> O(msg = ACCEPT | msg = REJECT | msg = PS_RDY)
+)
+
+/* P27: When a device advertises fewer than 1 PDO (pdo_count <= 0) but later accepts a REQUEST, flag non-compliance */
+H(
+  (pdo_count <= 0) & O(msg = ACCEPT) -> ( report_violation & violation_code = 105 )
+)
+
+/* P28: Firmware-update VDMs: if fw_update_cmd seen and later device emits messages indicating reflash (e.g., vendor ACK),
+      the monitor should flag unless out-of-band auth evident (coarse: any ACCEPT after fw_update_cmd) */
+H(
+  (vdm_present = true & fw_update_cmd = true) & O(msg = ACCEPT) -> ( report_violation & violation_code = 106 )
+)
+
+/* P29: Role-swap attempts that repeatedly flip-flop (PR_SWAP alternating with PR_SWAP_ACCEPT rapidly) may indicate instability:
+      if we see PR_SWAP & Y(PR_SWAP) within short logical window (past), flag for flapping */
+H(
+  msg = PR_SWAP & Y(msg = PR_SWAP) -> ( report_violation & violation_code = 107 )
+)
+
+/* P30: If a GET_BAT_CAP or GET_BAT_STATUS is answered with inconsistent values across repeated queries (e.g., battery capacity jumping wildly),
+      flag as potential buggy/untrusted reporting */
+H(
+  msg = GET_BAT_STATUS & Y(msg = GET_BAT_STATUS) & (content_length > 0) & (content_length != Y(content_length)) ->
+    ( report_violation & violation_code = 108 )
+)
+
+/* NOTE:
+   - The monitor can use the report_violation and violation_code fields to immediately signal the fuzzer to log and stop, or to prioritize inputs.
+   - Many properties are coarse (use O/ Y ) because the fuzzer/monitor operates black-box and only sees PD messages; still, violation implies logical or safety issues:
+       * accepting out-of-range REQUESTs (safety: over-voltage/over-current),
+       * PS_RDY missing after ACCEPT (safety: incomplete contract),
+       * honoring firmware-update VDMs without auth (security),
+       * role-swap ordering mistakes (logical correctness),
+       * malformed messages accepted (robustness),
+       * inconsistent SRC_CAPs or status (non-determinism).
+   - Adjust safety_limit_mV and other monitor-configured thresholds per testbed.
+*/

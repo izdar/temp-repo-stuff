@@ -1,0 +1,233 @@
+/*
+  tcp_security_io_properties.ltl  (request/response pairing update)
+
+  Past-time LTL properties for TCP using ONLY I/O events, structured as:
+    - syscall requests (enum request) for local API calls
+    - network responses (enum response) for peer-visible packet outcomes
+
+  Notes per your rules:
+    • Enums are ADTs (constructors only). We compare the enum predicate to a constructor (e.g., request = CONNECT).
+    • No separate enum-variable declarations (the enum name itself is the predicate in properties).
+    • No helper predicates or external state; only past-time operators H, O, Y, and S.
+*/
+
+//// Predicate and Type Declarations ////
+
+// Packet-level scalars (observable from the wire for the current event)
+bool pkt_present;              // a TCP packet was observed this step
+bool pkt_from_local;           // true if the observed packet was sent by the local side
+int  pkt_seq;                  // sequence number
+int  pkt_acknum;               // ack number
+int  pkt_len;                  // payload length (bytes) for this packet
+int  pkt_sport;                // source port
+int  pkt_dport;                // dest port
+int  pkt_ts_val;               // TCP TSval (-1 if absent)
+int  pkt_ts_ecr;               // TCP TSecr (-1 if absent)
+
+// Syscall "request" ADT — local API calls (no extra variable; used directly in properties)
+enum request {
+  SYSCALL_NOTSET,
+  SOCKET,
+  BIND,
+  LISTEN,
+  ACCEPT,
+  CONNECT,
+  READ,
+  WRITE,
+  CLOSE,
+  FCNTL,
+  IOCTL
+};
+
+// Network "response" ADT — peer-visible packet categories (remote → local)
+enum response {
+  responseNotSet,
+  R_SYN,            // remote sent SYN
+  R_SYN_ACK,        // remote sent SYN+ACK
+  R_ACK,            // remote sent pure ACK
+  R_FIN,            // remote sent FIN
+  R_RST,            // remote sent RST
+  R_DATA,           // remote sent data (len > 0)
+  TIMEOUT           // no packet observed within the oracle’s window for a prior trigger
+};
+
+// Per-event syscall scalars
+int  sys_fd;        // fd used/returned by the syscall (if applicable)
+int  sys_ret;       // syscall return value
+int  read_len;      // bytes returned by read()
+int  write_len;     // bytes accepted by write()
+
+// Aggregate counters from local viewpoint (purely observational)
+int  tx_data_sent;  // cumulative bytes successfully written by app so far
+int  rx_data_recv;  // cumulative bytes returned by read() so far
+
+// Violation flags (optional: your monitor can set/report these)
+bool report_violation;
+int  violation_code;
+
+
+/* =====================================================================
+   Security-Oriented TCP Properties over request/response I/O events
+   ===================================================================== */
+
+/* 1) connect() success implies we previously saw our local SYN and a remote SYN-ACK */
+H(
+  (request = CONNECT & sys_ret = 0) ->
+    ( O(pkt_present & pkt_from_local & pkt_len >= 0) &  /* local SYN existed; pkt flags implied by category in your tracer */
+      O(response = R_SYN_ACK) )
+)
+
+/* 2) accept() implies prior remote SYN (passive open) */
+H(
+  request = ACCEPT -> O(response = R_SYN)
+)
+
+/* 3) read()>0 implies completed handshake: local SYN, remote SYN-ACK, local ACK */
+H(
+  (request = READ & read_len > 0) ->
+    ( O(pkt_present & pkt_from_local) & O(response = R_SYN_ACK) & O(pkt_present & pkt_from_local) )
+)
+
+/* 4) No packet should be emitted before socket() creation (local emission observed) */
+H(
+  (pkt_present & pkt_from_local) -> O(request = SOCKET)
+)
+
+/* 5) connect() success requires remote SYN-ACK in the past */
+H(
+  (request = CONNECT & sys_ret = 0) -> O(response = R_SYN_ACK)
+)
+
+/* 6) accept() should not happen before SYN-ACK exchange has occurred */
+H(
+  request = ACCEPT -> O(response = R_SYN_ACK)
+)
+
+/* 7) No local data before the peer acknowledged the SYN (i.e., before remote SYN-ACK & our ACK) */
+H(
+  (pkt_present & pkt_from_local & pkt_len > 0) ->
+    ( O(response = R_SYN_ACK) & O(pkt_present & pkt_from_local) )
+)
+
+/* 8) FIN should only occur after at least one ACK exchange (either direction) */
+H(
+  response = R_FIN | (pkt_present & pkt_from_local & pkt_len = 0 /* FIN counted by tracer here */) ->
+    O(response = R_ACK | pkt_present & pkt_from_local)
+)
+
+/* 9) After successful close(), there should be no further local emission */
+H(
+  O(request = CLOSE & sys_ret >= 0) -> not O(pkt_present & pkt_from_local)
+)
+
+/* 10) No write() with positive return after a successful close() (classic fd misuse) */
+H(
+  (request = WRITE & sys_ret > 0) -> not O(request = CLOSE & sys_ret >= 0)
+)
+
+/* 11) Duplicate local SYN after we already sent an ACK (post-handshake) is suspicious */
+H(
+  (pkt_present & pkt_from_local) & O(pkt_present & pkt_from_local) ->
+    report_violation & violation_code = 1
+)
+
+/* 12) After a local FIN was sent, there must not be later local data */
+H(
+  O(pkt_present & pkt_from_local & pkt_len = 0 /* local FIN */) -> not O(pkt_present & pkt_from_local & pkt_len > 0)
+)
+
+/* 13) Timestamp monotonicity (direction-preserving): TS must not decrease for consecutive same-direction packets */
+H(
+  (pkt_present & pkt_ts_val >= 0) ->
+    not ( Y(pkt_ts_val >= 0 & pkt_ts_val < Y(pkt_ts_val) & pkt_from_local = Y(pkt_from_local)) )
+)
+
+/* 14) Timestamp echo must match some past TS seen from the opposite side */
+H(
+  (pkt_present & pkt_ts_ecr >= 0) -> O(pkt_present & pkt_ts_val = pkt_ts_ecr)
+)
+
+/* 15) SYN replay from local after we already sent a post-handshake ACK is suspicious */
+H(
+  (pkt_present & pkt_from_local) & O(pkt_present & pkt_from_local) ->
+    report_violation & violation_code = 2
+)
+
+/* 16) Local FIN before any data or ACK is invalid (tear-down too early) */
+H(
+  (pkt_present & pkt_from_local & pkt_len = 0 /* FIN */) ->
+    O(pkt_present & (pkt_len > 0 | !pkt_from_local))
+)
+
+/* 17) No simultaneous-open confusion: if we sent SYN, we shouldn’t also see remote SYN without SYN-ACK in between */
+H(
+  (pkt_present & pkt_from_local) -> not O(response = R_SYN & not O(response = R_SYN_ACK))
+)
+
+/* 18) No ACK acknowledging more than we ever wrote (coarse IO-level check) */
+H(
+  (response = R_ACK) & (pkt_acknum > tx_data_sent) ->
+    report_violation & violation_code = 3
+)
+
+/* 19) write() with positive return must come after connect() success or accept() */
+H(
+  (request = WRITE & sys_ret > 0) -> ( O(request = CONNECT & sys_ret = 0) | O(request = ACCEPT) )
+)
+
+/* 20) No read() after both sides have sent FIN (if you model remote FIN as response and local FIN as emitted) */
+H(
+  (request = READ & read_len > 0) ->
+    not ( O(response = R_FIN) & O(pkt_present & pkt_from_local & pkt_len = 0) )
+)
+
+/* 21) connect() must follow socket() */
+H(
+  request = CONNECT -> O(request = SOCKET)
+)
+
+/* 22) No write() success after local FIN emission */
+H(
+  (request = WRITE & sys_ret > 0) -> not O(pkt_present & pkt_from_local & pkt_len = 0)
+)
+
+/* 23) No local ACK before we ever saw a remote SYN-ACK (premature ACK) */
+H(
+  (pkt_present & pkt_from_local) -> O(response = R_SYN_ACK)
+)
+
+/* 24) Double FIN from the same side is not expected */
+H(
+  (pkt_present & pkt_from_local & pkt_len = 0) -> not O(pkt_present & pkt_from_local & pkt_len = 0)
+)
+
+/* 25) Immediate RST after our SYN without an intervening remote SYN-ACK indicates odd logic */
+H(
+  response = R_RST -> not ( O(pkt_present & pkt_from_local) & not O(response = R_SYN_ACK) )
+)
+
+/* 26) FIN without any prior read() or write() suggests empty-session teardown (flag for analysis) */
+H(
+  (pkt_present & pkt_len = 0) -> ( O(request = WRITE) | O(request = READ) )
+)
+
+/* 27) No remote SYN-ACK without a prior local SYN */
+H(
+  response = R_SYN_ACK -> O(pkt_present & pkt_from_local)
+)
+
+/* 28) Basic port sanity for every observed packet */
+H(
+  pkt_present -> (pkt_sport >= 0 & pkt_sport <= 65535 & pkt_dport >= 0 & pkt_dport <= 65535)
+)
+
+/* 29) Zero-length payload packets should be control (ACK/FIN/RST/SYN categories); if remote data, it must be >0 */
+H(
+  (response = R_DATA) -> (pkt_len > 0)
+)
+
+/* 30) Timestamps should be non-decreasing across packets since the first TS was seen (global PAWS-style) */
+H(
+  (pkt_present & pkt_ts_val >= 0) ->
+    not ( Y(pkt_ts_val >= 0 & pkt_ts_val > 0 & pkt_ts_val < Y(pkt_ts_val)) )
+)

@@ -1,0 +1,159 @@
+// dnsmasq DNS LTL Specification - WITH response_valid FILTER
+// Only monitors ACTUAL responses from dnsmasq (response_valid=true)
+
+enum message_type {
+  messageNotSet,
+  query,
+  response
+};
+
+enum opcode {
+  QUERY,
+  IQUERY,
+  STATUS,
+  OPCODE_UNKNOWN
+};
+
+enum rcode {
+  NOERROR,
+  FORMERR,
+  SERVFAIL,
+  NXDOMAIN,
+  NOTIMP,
+  REFUSED,
+  RCODE_UNKNOWN
+};
+
+enum qtype {
+  A,
+  AAAA,
+  MX,
+  NS,
+  CNAME,
+  PTR,
+  SOA,
+  TXT,
+  ANY,
+  QTYPE_UNKNOWN
+};
+
+bool is_query;
+bool is_response;
+bool aa;
+bool tc;
+bool rd;
+bool ra;
+bool ad;
+bool cd;
+
+int qdcount;
+int ancount;
+int nscount;
+int arcount;
+
+bool response_valid;
+bool dnssec_ok;
+int query_id;
+bool id_match;
+bool cache_hit;
+bool upstream_queried;
+
+
+/* ============================================================================
+   RESPONSE-ONLY PROPERTIES WITH response_valid FILTER
+   response_valid=true ensures we ONLY check actual dnsmasq responses
+   ============================================================================ */
+
+/* 1) Response QR flag */
+H(
+  (message_type = response & 
+   response_valid = true &
+   opcode = QUERY & 
+   qtype != QTYPE_UNKNOWN &
+   qdcount = 1) ->
+    is_response = true
+);
+
+/* 2) NXDOMAIN with answers */
+H(
+  !(message_type = response & 
+    response_valid = true &
+    rcode = NXDOMAIN & 
+    opcode = QUERY & 
+    qtype != QTYPE_UNKNOWN &
+    qdcount = 1 &
+    ancount > 0 &
+    ancount < 100)
+);
+
+/* 3) SERVFAIL with answers */
+H(
+  !(message_type = response & 
+    response_valid = true &
+    rcode = SERVFAIL & 
+    opcode = QUERY & 
+    qtype != QTYPE_UNKNOWN &
+    qdcount = 1 &
+    ancount > 0 &
+    ancount < 100)
+);
+
+/* 4) REFUSED with answers */
+H(
+  !(message_type = response & 
+    response_valid = true &
+    rcode = REFUSED & 
+    opcode = QUERY & 
+    qtype != QTYPE_UNKNOWN &
+    qdcount = 1 &
+    ancount > 0 &
+    ancount < 100)
+);
+
+/* 5) NOTIMP with answers */
+H(
+  !(message_type = response & 
+    response_valid = true &
+    rcode = NOTIMP & 
+    opcode = QUERY & 
+    qtype != QTYPE_UNKNOWN &
+    qdcount = 1 &
+    ancount > 0 &
+    ancount < 100)
+);
+
+/* 6) Answers require success code */
+H(
+  (message_type = response & 
+   response_valid = true &
+   opcode = QUERY & 
+   qtype != QTYPE_UNKNOWN &
+   qdcount = 1 &
+   ancount > 0 &
+   ancount < 100) ->
+    (rcode = NOERROR | rcode = NXDOMAIN)
+);
+
+/* 7) Empty authoritative answers */
+H(
+  !(message_type = response & 
+    response_valid = true &
+    rcode = NOERROR & 
+    aa = true & 
+    opcode = QUERY & 
+    qtype != QTYPE_UNKNOWN &
+    qtype != ANY &
+    qdcount = 1 &
+    ancount = 0 &
+    nscount = 0)
+);
+
+/* 8) ID mismatch */
+H(
+  !(message_type = response & 
+    response_valid = true &
+    opcode = QUERY & 
+    qtype != QTYPE_UNKNOWN &
+    qdcount = 1 &
+    id_match = false)
+);

@@ -1,0 +1,233 @@
+/*
+  sip_reqresp_core_properties.ltl
+
+  Purpose:
+    A single, self-contained file of SIP request/response **runtime** properties that
+    capture the **core protocol flow**. A violation of any property should indicate a
+    **real logical or security-relevant bug** that merits swift remediation.
+
+  Style & Constraints:
+    - I/O only: properties reason purely over observable requests/responses and header fields.
+    - Past-time LTL operators only: H (Historically), O(...) (Once), Y (yesterday/previous), S (since).
+    - Enums are ADTs (constructors only). We compare the enum predicate to constructors
+      directly in properties (e.g., `request = INVITE`), matching the style of your TCP example.
+    - No helper functions, no explicit state machines.
+
+  Monitor contract:
+    For each observed message event, set exactly one of `request = <Ctor>` or
+    `response = <Ctor>` (or the respective *_NotSet constructor at idle steps), and
+    set the scalar header/metadata fields below from the message as observed on the wire.
+*/
+
+/* ===========================
+   ADT enums (I/O event kinds)
+   =========================== */
+
+enum request {
+  requestNotSet,
+
+  /* Core methods */
+  INVITE, ACK, BYE, CANCEL, REGISTER, OPTIONS,
+  PRACK, UPDATE, INFO, MESSAGE, SUBSCRIBE, NOTIFY, REFER, PUBLISH
+};
+
+enum response {
+  responseNotSet,
+
+  /* Provisional (1xx) */
+  R_100_TRYING, R_180_RINGING, R_183_SESSION_PROGRESS,
+
+  /* Success / final (subset used for core flow checks) */
+  R_2XX_OK,              /* generic 2xx */
+  R_200_OK,              /* explicit 200 OK if your tracer distinguishes */
+  R_3XX_REDIRECT,
+
+  /* Auth / client errors */
+  R_401_UNAUTHORIZED, R_407_PROXY_AUTH_REQUIRED,
+  R_4XX_CLIENT_ERROR, R_408_REQUEST_TIMEOUT, R_486_BUSY_HERE, R_487_REQUEST_TERMINATED,
+
+  /* Server / global failures */
+  R_5XX_SERVER_ERROR, R_6XX_GLOBAL_FAILURE
+};
+
+/* =========================================
+   Per-message observable scalars / flags
+   ========================================= */
+
+int  call_id;             /* hash/id of Call-ID for this message (same-dialog grouping) */
+int  cseq;                /* CSeq numeric value for this message */
+bool has_from_tag;        /* From tag present */
+bool has_to_tag;          /* To tag present */
+int  via_branch;          /* top Via branch parameter id (0 if missing) */
+int  via_count;           /* number of Via headers */
+int  max_forwards;        /* Max-Forwards (requests only) */
+bool has_contact;         /* Contact header present */
+bool has_sdp;             /* SDP body present (Content-Type application/sdp) */
+int  content_length;      /* Content-Length */
+
+bool is_reliable_prov;    /* responses: true for 1xx with 100rel (Require/Supported + RSeq present) */
+bool rack_present;        /* PRACK carries RAck */
+int  rack_rseq;           /* RAck’s RSeq (if present), else -1 */
+
+bool has_authorization;       /* Authorization header present (after 401) */
+bool has_proxy_authorization; /* Proxy-Authorization header present (after 407) */
+
+/* (Optional counters if your monitor maintains them—used by some checks) */
+int  auth_attempts;       /* count of auth-bearing requests observed since last 401/407 */
+
+
+/* ============================================================
+   Core SIP Security/Safety/Logic Properties (Past-time LTL)
+   ============================================================ */
+
+/* ---------- Dialog Establishment & Basic Ordering ---------- */
+
+/* P1) A final success to INVITE (2xx) must carry a To-tag (dialog establishment) */
+H( response = R_2XX_OK -> has_to_tag = true )
+
+/* P2) Provisional responses (100/180/183) must follow an INVITE */
+H( (response = R_100_TRYING | response = R_180_RINGING | response = R_183_SESSION_PROGRESS) -> O(request = INVITE) )
+
+/* P3) 486 Busy / 408 Timeout must follow an INVITE (transaction coherence) */
+H( (response = R_486_BUSY_HERE | response = R_408_REQUEST_TIMEOUT) -> O(request = INVITE) )
+
+/* P4) 487 Request Terminated should follow CANCEL and prior INVITE */
+H( response = R_487_REQUEST_TERMINATED -> (O(request = CANCEL) & O(request = INVITE)) )
+
+/* P5) ACK is only valid after a 2xx (classic INVITE transaction) */
+H( request = ACK -> O(response = R_2XX_OK) )
+
+/* P6) BYE must follow dialog establishment (2xx with To-tag) */
+H( request = BYE -> O(response = R_2XX_OK & has_to_tag = true) )
+
+/* P7) CANCEL only makes sense after an INVITE */
+H( request = CANCEL -> O(request = INVITE) )
+
+/* P8) Re-INVITE / UPDATE only after dialog established */
+H( (request = UPDATE | request = INVITE) -> O(response = R_2XX_OK) )
+
+/* P9) Initial INVITE should NOT carry a To-tag (avoid in-dialog confusion for first INVITE) */
+H( request = INVITE & not O(response = R_2XX_OK & has_to_tag = true) -> has_to_tag = false )
+
+
+/* ---------- Reliable Provisional (100rel) & PRACK ---------- */
+
+/* P10) Reliable 1xx implies a prior INVITE */
+H( is_reliable_prov = true -> O(request = INVITE) )
+
+/* P11) PRACK must follow a reliable 1xx and include RAck */
+H( request = PRACK -> (rack_present = true & O(is_reliable_prov = true)) )
+
+/* P12) If 2xx appears and a reliable 1xx existed earlier, PRACK should have occurred */
+H( (response = R_2XX_OK) & Y(is_reliable_prov = true) -> O(request = PRACK) )
+
+/* P13) Across multiple PRACKs, RAck.RSeq should increase (replay/misordering guard) */
+H( request = PRACK & rack_present = true & Y(request = PRACK & rack_present = true) -> (rack_rseq > Y(rack_rseq)) )
+
+
+/* ---------- Authentication (401/407) ---------- */
+
+/* P14) After 401, subsequent REGISTER/INVITE must carry Authorization until a 2xx occurs */
+H( (has_authorization = true) S (response = R_401_UNAUTHORIZED) )
+
+/* P15) After 407, subsequent requests must carry Proxy-Authorization until a 2xx occurs */
+H( (has_proxy_authorization = true) S (response = R_407_PROXY_AUTH_REQUIRED) )
+
+/* P16) A 2xx after 401/407 requires that an auth-bearing request occurred since the challenge */
+H( (response = R_2XX_OK) & Y(response = R_401_UNAUTHORIZED | response = R_407_PROXY_AUTH_REQUIRED)
+   -> O(has_authorization = true | has_proxy_authorization = true) )
+
+/* P17) Repeated 401/407 without increasing auth_attempts suggests broken auth handling */
+H( (response = R_401_UNAUTHORIZED | response = R_407_PROXY_AUTH_REQUIRED)
+   & Y(response = R_401_UNAUTHORIZED | response = R_407_PROXY_AUTH_REQUIRED)
+   -> (auth_attempts > Y(auth_attempts)) )
+
+
+/* ---------- Header Presence, Framing & Content ---------- */
+
+/* P18) INVITE must include at least one Via and Max-Forwards > 0 (loop prevention) */
+H( request = INVITE -> (via_count >= 1 & max_forwards > 0) )
+
+/* P19) Any non-ACK request must carry a Via branch (transaction lineage) */
+H( (request = INVITE | request = BYE | request = CANCEL | request = UPDATE | request = INFO |
+     request = MESSAGE | request = SUBSCRIBE | request = NOTIFY | request = REFER | request = OPTIONS | request = REGISTER)
+   -> (via_branch != 0) )
+
+/* P20) If an SDP body is present, its Content-Length must be positive */
+H( has_sdp = true -> content_length > 0 )
+
+/* P21) MESSAGE must not have zero Content-Length */
+H( request = MESSAGE -> content_length > 0 )
+
+/* P22) 183 Session Progress with SDP must follow an INVITE (early media path) */
+H( response = R_183_SESSION_PROGRESS & has_sdp = true -> O(request = INVITE) )
+
+
+/* ---------- Request/Response Pairing ---------- */
+
+/* P23) 200 OK must pair with a corresponding request:
+        – OPTIONS→200 OK, and allow common 200s to INVITE/REGISTER explicitly */
+H( response = R_200_OK -> O(request = OPTIONS | request = INVITE | request = REGISTER) )
+
+/* P24) 2xx to REGISTER implies a REGISTER occurred */
+H( response = R_2XX_OK -> O(request = REGISTER | request = INVITE) )
+
+/* P25) 3xx Redirect must follow an initiating request (INVITE or REGISTER) */
+H( response = R_3XX_REDIRECT -> O(request = INVITE | request = REGISTER) )
+
+/* P26) NOTIFY requires a prior SUBSCRIBE (event framework pairing) */
+H( request = NOTIFY -> O(request = SUBSCRIBE) )
+
+/* P27) REFER should follow dialog establishment (2xx) */
+H( request = REFER -> O(response = R_2XX_OK) )
+
+
+/* ---------- CSeq / Sequencing per Call-ID ---------- */
+
+/* P28) For consecutive requests within the same Call-ID, CSeq must not decrease */
+H(
+  (request = INVITE | request = BYE | request = CANCEL | request = UPDATE | request = INFO |
+   request = MESSAGE | request = SUBSCRIBE | request = NOTIFY | request = REFER | request = OPTIONS | request = REGISTER)
+  -> not ( Y(call_id = call_id & cseq < Y(cseq)) )
+)
+
+/* P29) Re-INVITE must increase CSeq compared to previous INVITE with same Call-ID */
+H( request = INVITE & Y(request = INVITE & call_id = call_id) -> (cseq > Y(cseq)) )
+
+/* P30) UPDATE must not decrease CSeq */
+H( request = UPDATE & Y(call_id = call_id) -> (cseq >= Y(cseq)) )
+
+
+/* ---------- CANCEL / Early-Dialog Semantics ---------- */
+
+/* P31) Once CANCEL is sent (for the INVITE), there must not be a later 2xx to that INVITE */
+H( O(request = CANCEL) -> not (response = R_2XX_OK S request = CANCEL) )
+
+/* P32) If 487 occurs, there must have been a CANCEL (and an INVITE before it) */
+H( response = R_487_REQUEST_TERMINATED -> (O(request = CANCEL) & O(request = INVITE)) )
+
+
+/* ---------- Error/Success Transition Coherence ---------- */
+
+/* P33) A final success (2xx) must NOT occur after a final server/global failure (5xx/6xx) for the same flow */
+H( !(response = R_2XX_OK | response = R_200_OK)
+   S (response = R_5XX_SERVER_ERROR | response = R_6XX_GLOBAL_FAILURE) )
+
+/* P34) After any final error (4xx/5xx/6xx), a subsequent provisional 1xx is inconsistent */
+H( (response = R_100_TRYING | response = R_180_RINGING | response = R_183_SESSION_PROGRESS)
+   -> not O(response = R_4XX_CLIENT_ERROR | response = R_5XX_SERVER_ERROR | response = R_6XX_GLOBAL_FAILURE) )
+
+
+/* ---------- Teardown Discipline ---------- */
+
+/* P35) After BYE is sent, since that BYE, no further in-dialog requests (strict teardown) */
+H(
+  !(request = INVITE | request = BYE | request = CANCEL | request = UPDATE | request = INFO |
+    request = MESSAGE | request = SUBSCRIBE | request = NOTIFY | request = REFER | request = OPTIONS | request = REGISTER)
+  S (request = BYE)
+)
+
+/* ---------- Response Lineage ---------- */
+
+/* P36) Any response requires that a Via branch was seen earlier (coarse request→response lineage) */
+H( response != responseNotSet -> O(via_branch != 0) )

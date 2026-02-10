@@ -1,0 +1,416 @@
+// ========================= FTP Specification for LightFTP =========================
+// LTL properties for detecting semantic violations in FTP protocol implementation
+// Target: LightFTP server fuzzing with AFLNet
+// ==================================================================================
+
+// ========================= Declarations =========================
+
+// --- FTP Commands ---
+enum ftp_command {
+    cmdNotSet,
+    cmdUSER,
+    cmdPASS,
+    cmdACCT,
+    cmdCWD,
+    cmdCDUP,
+    cmdSMNT,
+    cmdQUIT,
+    cmdREIN,
+    cmdPORT,
+    cmdPASV,
+    cmdTYPE,
+    cmdSTRU,
+    cmdMODE,
+    cmdRETR,
+    cmdSTOR,
+    cmdSTOU,
+    cmdAPPE,
+    cmdALLO,
+    cmdREST,
+    cmdRNFR,
+    cmdRNTO,
+    cmdABOR,
+    cmdDELE,
+    cmdRMD,
+    cmdMKD,
+    cmdPWD,
+    cmdLIST,
+    cmdNLST,
+    cmdSITE,
+    cmdSYST,
+    cmdSTAT,
+    cmdHELP,
+    cmdNOOP,
+    cmdFEAT,
+    cmdOPTS,
+    cmdAUTH,
+    cmdPBSZ,
+    cmdPROT,
+    cmdEPRT,
+    cmdEPSV,
+    cmdSIZE,
+    cmdMLSD,
+    cmdMLST
+};
+
+// --- FTP Response Classes ---
+enum ftp_status_class {
+    scNotSet,
+    scPreliminary,     // 1xx - Positive Preliminary reply
+    scSuccess,         // 2xx - Positive Completion reply
+    scIntermediate,    // 3xx - Positive Intermediate reply
+    scTransientError,  // 4xx - Transient Negative Completion reply
+    scPermanentError   // 5xx - Permanent Negative Completion reply
+};
+
+// --- Authentication State ---
+enum auth_state {
+    authNone,
+    authUserSent,
+    authPasswordSent,
+    authComplete,
+    authFailed
+};
+
+// --- Data Connection State ---
+enum data_state {
+    dataNotSet,
+    dataPORT,
+    dataPASV,
+    dataEPRT,
+    dataEPSV,
+    dataActive,
+    dataClosed
+};
+
+// --- Transfer Type ---
+enum transfer_type {
+    typeNotSet,
+    typeASCII,
+    typeBinary,
+    typeEBCDIC,
+    typeLocal
+};
+
+// ---------------- Integers ----------------
+int resp_code;              // FTP response code (e.g., 220, 331, 530)
+int sequence_number;        // Command sequence number
+int port_number;            // Port specified in PORT/PASV
+int file_size;              // File size for RETR/STOR
+int rest_position;          // REST restart position
+
+// ---------------- Booleans ----------------
+bool cmd_malformed;         // Command syntax error
+bool resp_malformed;        // Response syntax error
+bool user_logged_in;        // User successfully authenticated
+bool data_connection_open;  // Data connection established
+bool transfer_in_progress;  // File transfer ongoing
+bool timeout;               // Operation timed out
+bool connection_closed;     // Control connection closed
+
+// --- Authentication tracking ---
+bool user_sent;             // USER command sent
+bool pass_sent;             // PASS command sent
+bool login_successful;      // Login completed (230 response)
+bool login_failed;          // Login rejected (530 response)
+
+// --- Data connection tracking ---
+bool port_sent;             // PORT command sent
+bool pasv_sent;             // PASV command sent
+bool pasv_response_received; // PASV response (227) received
+bool port_accepted;         // PORT accepted (200 response)
+
+// --- Transfer tracking ---
+bool retr_sent;             // RETR command sent
+bool stor_sent;             // STOR command sent
+bool transfer_started;      // Transfer initiation (150 response)
+bool transfer_complete;     // Transfer done (226 response)
+bool transfer_aborted;      // ABOR command sent
+
+// --- Rename tracking ---
+bool rnfr_sent;             // RNFR command sent
+bool rnfr_accepted;         // RNFR accepted (350 response)
+bool rnto_sent;             // RNTO command sent
+
+// --- Session state ---
+bool session_initialized;   // Welcome message received (220)
+bool quit_sent;             // QUIT command sent
+bool reinit_sent;           // REIN command sent
+
+
+// ========================= Properties (H(...)) ==================
+
+// ------------------------------------------------------------------
+// 0x — Connection and Session Management
+// ------------------------------------------------------------------
+
+// 00 — Session must start with 220 (Service ready)
+H( sequence_number = 0 -> (resp_code = 220 | timeout = true) );
+
+// 01 — Cannot execute commands before session initialized
+H( session_initialized = false & ftp_command != cmdNotSet -> 
+   ftp_status_class = scPermanentError | timeout = true );
+
+// 02 — QUIT should receive 221 (Service closing)
+H( ftp_command = cmdQUIT & ftp_status_class = scSuccess -> resp_code = 221 );
+
+// 03 — After QUIT, no further commands should succeed
+H( quit_sent = true -> 
+   (ftp_command != cmdNotSet -> ftp_status_class != scSuccess) );
+
+// 04 — Timeout should not yield success
+H( timeout = true -> ftp_status_class != scSuccess );
+
+// 05 — Malformed command should not succeed
+H( cmd_malformed = true -> ftp_status_class != scSuccess );
+
+// 06 — Connection closed implies no success responses
+H( connection_closed = true -> ftp_status_class = scNotSet );
+
+// ------------------------------------------------------------------
+// 1x — Authentication Sequence
+// ------------------------------------------------------------------
+
+// 10 — USER must come before PASS
+H( ftp_command = cmdPASS & user_sent = false -> 
+   ftp_status_class = scPermanentError );
+
+// 11 — Successful USER gets 331 (Need password)
+H( ftp_command = cmdUSER & ftp_status_class = scIntermediate -> 
+   resp_code = 331 );
+
+// 12 — PASS without USER should fail
+H( ftp_command = cmdPASS & auth_state = authNone -> 
+   resp_code = 503 );
+
+// 13 — Successful login gets 230 (User logged in)
+H( ftp_command = cmdPASS & ftp_status_class = scSuccess -> 
+   resp_code = 230 );
+
+// 14 — Login failure gets 530 (Not logged in)
+H( ftp_command = cmdPASS & login_failed = true -> 
+   resp_code = 530 );
+
+// 15 — Cannot execute protected commands without login
+H( user_logged_in = false & 
+   (ftp_command = cmdRETR | ftp_command = cmdSTOR | ftp_command = cmdDELE) ->
+   resp_code = 530 );
+
+// 16 — Successful login should set user_logged_in
+H( resp_code = 230 -> user_logged_in = true );
+
+// 17 — REIN clears authentication
+H( ftp_command = cmdREIN & ftp_status_class = scSuccess -> 
+   Y( O( user_logged_in = false ) ) );
+
+// ------------------------------------------------------------------
+// 2x — Data Connection Management
+// ------------------------------------------------------------------
+
+// 20 — PORT and PASV are mutually exclusive per transfer
+H( port_sent = true & pasv_sent = true -> 
+   !(ftp_command = cmdRETR | ftp_command = cmdSTOR) );
+
+// 21 — PORT acceptance gets 200
+H( ftp_command = cmdPORT & ftp_status_class = scSuccess -> 
+   resp_code = 200 );
+
+// 22 — PASV success gets 227 (Entering Passive Mode)
+H( ftp_command = cmdPASV & ftp_status_class = scSuccess -> 
+   resp_code = 227 );
+
+// 23 — Data transfer requires PORT or PASV first
+H( (ftp_command = cmdRETR | ftp_command = cmdSTOR | ftp_command = cmdLIST) &
+   port_sent = false & pasv_sent = false ->
+   ftp_status_class = scTransientError );
+
+// 24 — PASV response should set pasv_response_received
+H( resp_code = 227 -> pasv_response_received = true );
+
+// 25 — Cannot have multiple active data connections
+H( data_connection_open = true & 
+   (ftp_command = cmdPORT | ftp_command = cmdPASV) ->
+   ftp_status_class = scTransientError );
+
+// ------------------------------------------------------------------
+// 3x — File Transfer Operations
+// ------------------------------------------------------------------
+
+// 30 — RETR/STOR start gets 150 (File status okay)
+H( (ftp_command = cmdRETR | ftp_command = cmdSTOR) & 
+   transfer_started = true ->
+   resp_code = 150 );
+
+// 31 — Transfer completion gets 226 (Closing data connection)
+H( transfer_complete = true -> resp_code = 226 );
+
+// 32 — Cannot RETR/STOR without login
+H( user_logged_in = false & 
+   (ftp_command = cmdRETR | ftp_command = cmdSTOR) ->
+   resp_code = 530 );
+
+// 33 — Transfer in progress blocks new transfers
+H( transfer_in_progress = true &
+   (ftp_command = cmdRETR | ftp_command = cmdSTOR) ->
+   ftp_status_class != scPreliminary );
+
+// 34 — ABOR during transfer should succeed
+H( transfer_in_progress = true & ftp_command = cmdABOR ->
+   (ftp_status_class = scSuccess | ftp_status_class = scPreliminary) );
+
+// 35 — Transfer completion implies data connection was open
+H( transfer_complete = true -> 
+   Y( O( data_connection_open = true ) ) );
+
+// RETR/STOR should be preceded by REST (if rest_position set)
+H( (ftp_command = cmdRETR | ftp_command = cmdSTOR) & rest_position > 0 ->
+   O( ftp_command = cmdREST ) );
+
+// ------------------------------------------------------------------
+// 4x — File/Directory Management
+// ------------------------------------------------------------------
+
+// 40 — RNFR must come before RNTO
+H( ftp_command = cmdRNTO & rnfr_accepted = false ->
+   resp_code = 503 );
+
+// 41 — Successful RNFR gets 350 (Requested file action pending)
+H( ftp_command = cmdRNFR & ftp_status_class = scIntermediate ->
+   resp_code = 350 );
+
+// 42 — RNTO without RNFR should fail
+H( ftp_command = cmdRNTO & rnfr_sent = false ->
+   resp_code = 503 );
+
+// 43 — File operations require login
+H( user_logged_in = false &
+   (ftp_command = cmdDELE | ftp_command = cmdMKD | ftp_command = cmdRMD) ->
+   resp_code = 530 );
+
+// 44 — CWD success gets 250 (Requested file action okay)
+H( ftp_command = cmdCWD & ftp_status_class = scSuccess ->
+   resp_code = 250 );
+
+// 45 — PWD success gets 257 (PATHNAME created)
+H( ftp_command = cmdPWD & ftp_status_class = scSuccess ->
+   resp_code = 257 );
+
+// ------------------------------------------------------------------
+// 5x — Response Code Consistency
+// ------------------------------------------------------------------
+
+// 50 — scSuccess implies 2xx code
+H( ftp_status_class = scSuccess ->
+   (resp_code >= 200 & resp_code < 300) );
+
+// 51 — scIntermediate implies 3xx code
+H( ftp_status_class = scIntermediate ->
+   (resp_code >= 300 & resp_code < 400) );
+
+// 52 — scTransientError implies 4xx code
+H( ftp_status_class = scTransientError ->
+   (resp_code >= 400 & resp_code < 500) );
+
+// 53 — scPermanentError implies 5xx code
+H( ftp_status_class = scPermanentError ->
+   (resp_code >= 500 & resp_code < 600) );
+
+// 54 — scPreliminary implies 1xx code
+H( ftp_status_class = scPreliminary ->
+   (resp_code >= 100 & resp_code < 200) );
+
+// 55 — Timeout implies no response code
+H( timeout = true -> resp_code = 0 );
+
+// ------------------------------------------------------------------
+// 6x — Transfer Type and Mode
+// ------------------------------------------------------------------
+
+// 60 — TYPE command success gets 200
+H( ftp_command = cmdTYPE & ftp_status_class = scSuccess ->
+   resp_code = 200 );
+
+// 61 — MODE command success gets 200
+H( ftp_command = cmdMODE & ftp_status_class = scSuccess ->
+   resp_code = 200 );
+
+// 62 — STRU command success gets 200
+H( ftp_command = cmdSTRU & ftp_status_class = scSuccess ->
+   resp_code = 200 );
+
+// ------------------------------------------------------------------
+// 7x — LightFTP-Specific Vulnerabilities
+// ------------------------------------------------------------------
+
+// 70 — No buffer overflow in long commands
+H( cmd_malformed = true & sequence_number > 5 ->
+   (connection_closed = false) );
+
+// 71 — Multiple rapid PORTs should not crash
+H( ftp_command = cmdPORT & 
+   Y( ftp_command = cmdPORT ) ->
+   ftp_status_class != scNotSet );
+
+// 72 — PASV followed by PORT should be handled
+H( pasv_sent = true & ftp_command = cmdPORT ->
+   (ftp_status_class = scSuccess | ftp_status_class = scTransientError) );
+
+// 73 — Empty commands should not crash server
+H( ftp_command = cmdNotSet & cmd_malformed = false ->
+   (ftp_status_class = scPermanentError | timeout = true) );
+
+// 74 — Authentication bypass attempt should fail
+H( user_logged_in = false & ftp_command = cmdRETR ->
+   resp_code = 530 );
+
+// 75 — Path traversal in CWD should fail
+H( ftp_command = cmdCWD & cmd_malformed = true ->
+   ftp_status_class != scSuccess );
+
+// ------------------------------------------------------------------
+// 8x — Command Sequencing
+// ------------------------------------------------------------------
+
+// 80 — USER can be sent multiple times
+H( ftp_command = cmdUSER ->
+   (ftp_status_class = scIntermediate | ftp_status_class = scSuccess) );
+
+// 81 — NOOP always succeeds if session initialized
+H( session_initialized = true & ftp_command = cmdNOOP ->
+   ftp_status_class = scSuccess );
+
+// 82 — SYST returns system type (215)
+H( ftp_command = cmdSYST & ftp_status_class = scSuccess ->
+   resp_code = 215 );
+
+// 83 — FEAT success gets 211
+H( ftp_command = cmdFEAT & ftp_status_class = scSuccess ->
+   resp_code = 211 );
+
+// 84 — HELP success gets 214
+H( ftp_command = cmdHELP & ftp_status_class = scSuccess ->
+   resp_code = 214 );
+
+// ------------------------------------------------------------------
+// 9x — Error Recovery and Robustness
+// ------------------------------------------------------------------
+
+// 90 — Malformed response should not occur on valid command
+H( cmd_malformed = false & resp_malformed = true ->
+   !(ftp_status_class = scSuccess) );
+
+// 91 — After timeout, next valid command should work
+H( Y( timeout = true ) & timeout = false & ftp_command = cmdNOOP ->
+   ftp_status_class = scSuccess );
+
+// 92 — Connection should not close unexpectedly during transfer
+H( transfer_in_progress = true & connection_closed = true ->
+   transfer_aborted = true );
+
+// 93 — Repeated login failures should not crash
+H( login_failed = true & Y( login_failed = true ) ->
+   ftp_status_class != scNotSet );
+
+// 94 — Invalid command should get 500 or 502
+H( cmd_malformed = true & timeout = false ->
+   (resp_code = 500 | resp_code = 502) );

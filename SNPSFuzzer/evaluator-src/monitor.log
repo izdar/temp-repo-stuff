@@ -1,0 +1,71 @@
+
+========================================
+[MONITOR] Started at 1770745979
+========================================
+[MONITOR] Initializing multi-protocol evaluator (continuous mode)...
+[MONITOR] Loading spec: ../monitor-bin/ftp.txt
+[MONITOR] Protocol tag: generic
+[MONITOR] Parsing LTL specification...
+[MONITOR] Building type checker and evaluator...
+[DEBUG] root.second.size() = 6
+[DEBUG] serials.size() = 6
+[DEBUG] serials[0] = 24
+[DEBUG] serials[1] = 24
+[DEBUG] serials[2] = 4
+[DEBUG] serials[3] = 29
+[DEBUG] serials[4] = 45
+[DEBUG] serials[5] = 29
+[DEBUG] root.second[0] = H(timeout==false & connection_closed==false & quit_sent==false & ftp_command==cmdPORT & ftp_status_class==scSuccess -> (port_number > 0))
+[DEBUG] root.second[1] = H(timeout==false & resp_malformed==false & connection_closed==false & quit_sent==false & resp_code==227 -> ftp_command==cmdPASV)
+[DEBUG] root.second[2] = H(resp_malformed==false)
+[DEBUG] root.second[3] = H(!(timeout==false & resp_malformed==false & connection_closed==false & quit_sent==false & ftp_command==cmdRNTO & ftp_status_class==scSuccess & rnfr_accepted==false))
+[DEBUG] root.second[4] = H(!(timeout==false & resp_malformed==false & connection_closed==false & quit_sent==false & user_logged_in==false & ftp_command==cmdRETR | ftp_command==cmdSTOR | ftp_command==cmdDELE | ftp_command==cmdRNFR | ftp_command==cmdRNTO & ftp_status_class==scSuccess))
+[DEBUG] root.second[5] = H(!(timeout==false & resp_malformed==false & connection_closed==false & quit_sent==false & ftp_command==cmdPASS & resp_code==230 & user_sent==false))
+  Property[0] <unknown property>
+  Property[1] <unknown property>
+  Property[2] H(!(timeout==false & resp_malformed==false & connection_closed==false & quit_sent==false & user_logged_in==false & ftp_command==cmdRETR | ftp_command==cmdSTOR | ftp_command==cmdDELE | ftp_command==cmdRNFR | ftp_command==cmdRNTO & ftp_status_class==scSuccess))
+  Property[3] <unknown property>
+  Property[4] <unknown property>
+  Property[5] <unknown property>
+[MONITOR] Loaded 6 LTL properties for protocol: generic
+[MONITOR] Ready to receive events (continuous mode - won't exit on violations)
+
+========================================
+[MONITOR] Started at 1770746112
+========================================
+[MONITOR] Initializing multi-protocol evaluator (continuous mode)...
+[MONITOR] Loading spec: ../monitor-bin/ftp.txt
+[MONITOR] Protocol tag: generic
+[MONITOR] Parsing LTL specification...
+[MONITOR] Building type checker and evaluator...
+  Property[0] H(timeout==false & connection_closed==false & quit_sent==false & ftp_command==cmdPORT & ftp_status_class==scSuccess -> (port_number > 0))
+  Property[1] H(timeout==false & resp_malformed==false & connection_closed==false & quit_sent==false & resp_code==227 -> ftp_command==cmdPASV)
+  Property[2] H(resp_malformed==false)
+  Property[3] H(!(timeout==false & resp_malformed==false & connection_closed==false & quit_sent==false & ftp_command==cmdRNTO & ftp_status_class==scSuccess & rnfr_accepted==false))
+  Property[4] H(!(timeout==false & resp_malformed==false & connection_closed==false & quit_sent==false & user_logged_in==false & ftp_command==cmdRETR | ftp_command==cmdSTOR | ftp_command==cmdDELE | ftp_command==cmdRNFR | ftp_command==cmdRNTO & ftp_status_class==scSuccess))
+  Property[5] H(!(timeout==false & resp_malformed==false & connection_closed==false & quit_sent==false & ftp_command==cmdPASS & resp_code==230 & user_sent==false))
+[MONITOR] Loaded 6 LTL properties for protocol: generic
+[MONITOR] Ready to receive events (continuous mode - won't exit on violations)
+[EVENT] 
+
+========================================
+[MONITOR] Started at 1770746158
+========================================
+[MONITOR] Initializing multi-protocol evaluator (continuous mode)...
+[MONITOR] Loading spec: ../monitor-bin/ftp.txt
+[MONITOR] Protocol tag: generic
+[MONITOR] Parsing LTL specification...
+[MONITOR] Building type checker and evaluator...
+  Property[0] H(timeout==false & connection_closed==false & quit_sent==false & ftp_command==cmdPORT & ftp_status_class==scSuccess -> (port_number > 0))
+  Property[1] H(timeout==false & resp_malformed==false & connection_closed==false & quit_sent==false & resp_code==227 -> ftp_command==cmdPASV)
+  Property[2] H(resp_malformed==false)
+  Property[3] H(!(timeout==false & resp_malformed==false & connection_closed==false & quit_sent==false & ftp_command==cmdRNTO & ftp_status_class==scSuccess & rnfr_accepted==false))
+  Property[4] H(!(timeout==false & resp_malformed==false & connection_closed==false & quit_sent==false & user_logged_in==false & ftp_command==cmdRETR | ftp_command==cmdSTOR | ftp_command==cmdDELE | ftp_command==cmdRNFR | ftp_command==cmdRNTO & ftp_status_class==scSuccess))
+  Property[5] H(!(timeout==false & resp_malformed==false & connection_closed==false & quit_sent==false & ftp_command==cmdPASS & resp_code==230 & user_sent==false))
+[MONITOR] Loaded 6 LTL properties for protocol: generic
+[MONITOR] Ready to receive events (continuous mode - won't exit on violations)
+[EVENT] rnfr_accepted=false, login_successful=false, stor_sent=false, rnfr_sent=true, dir=S2C, pasv_response_received=false, transfer_type=typeNotSet, pasv_sent=false, pass_sent=false, cmd_malformed=false, file_size=0, transfer_complete=false, data_connection_open=false, rnto_sent=false, transfer_started=false, login_failed=true, reinit_sent=false, timeout=false, resp_malformed=false, session_initialized=true, auth_state=authFailed, data_state=dataNotSet, ftp_status_class=scSuccess, retr_sent=false, port_accepted=false, user_logged_in=false, quit_sent=false, rest_position=0, transfer_in_progress=false, sequence_number=29, port_sent=false, port_number=0, resp_code=220, connection_closed=false, ftp_command=cmdRNFR, trace=323230204c69676874465450207365727665722076322e30612072656164790d0a, user_sent=false, transfer_aborted=false
+[MONITOR] *** VIOLATION #1 *** (1 rule(s), event #1, session #0)
+ - Property 4: H(!(timeout==false & resp_malformed==false & connection_closed==false & quit_sent==false & user_logged_in==false & ftp_command==cmdRETR | ftp_command==cmdSTOR | ftp_command==cmdDELE | ftp_command==cmdRNFR | ftp_command==cmdRNTO & ftp_status_class==scSuccess))
+[VIOLATION_TRACE] indices: 4 
+[VIOLATION_TRACE] trace_length: 1

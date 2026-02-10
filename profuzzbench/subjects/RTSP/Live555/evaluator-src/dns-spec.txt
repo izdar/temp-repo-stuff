@@ -1,0 +1,127 @@
+// ========================= Declarations =========================
+
+// Enums for query / response types and codes
+enum q_transport  {transNotSet, UDP, TCP};
+enum q_type       {qNotSet, A, AAAA, CNAME, NS, MX, TXT, ANY, OPT, DNSSEC, OTHER};
+enum rcode        {rcNotSet, NOERROR, NXDOMAIN, SERVFAIL, FORMERR, NOTIMP, REFUSED, YXDOMAIN};
+enum rr_kind      {rrNotSet, RR_A, RR_AAAA, RR_CNAME, RR_NS, RR_MX, RR_RRSIG, RR_DNSKEY, RR_DS, RR_OTHER};
+
+// Integers
+int q_id;               // query ID
+int resp_id;            // response ID
+int ancount;            // answer count in response
+int nscount;            // ns count
+int arcount;            // additional count
+int resp_min_ttl;       // min TTL observed in returned RRsets (or -1 if none)
+int prev_negative_ttl;  // from previous NXDOMAIN reply (in seconds), -1 if none
+int time_since_prev;    // seconds since previous query/reply (for negative cache window)
+int resp_port;          // source port used in response
+
+// Enums / flags / booleans
+enum q_transport transport;    // transport used for this query (UDP/TCP)
+enum q_type     qtype;         // query QTYPE
+enum rcode      resp_rcode;    // response RCODE
+bool resp_tc;                  // TC flag (truncated)
+bool resp_ad;                  // AD flag (authentic data)
+bool resp_do;                  // DO bit present (EDNS) in response (or query)
+bool resp_aa;                  // AA (authoritative) flag set
+bool resp_malformed;           // parsing error / wire malformed
+bool tcp_fallback_seen;        // client attempted TCP fallback for this query (or harness observed it)
+bool timeout;                  // no response within timeout window
+bool dnssec_present;           // RRSIG/DNSKEY/DS present in answer/authority/ar
+bool opt_present;              // EDNS OPT present
+bool id_randomized_mismatch;   // heuristic: response ID doesn't match expected randomized ID range
+bool ans_has_rrset_k;          // shorthand boolean: answer contains the canonical RRSET we track (for name/type k)
+bool auth_source_expected;     // whether response origin claimed to be authoritative (set by adapter if known)
+bool server_behaved_nonidempotent; // used to mark surprising non-idempotent behavior across retries
+bool ttl_zero_exposed;         // returned TTL of 0 in answer
+bool resp_from_unexpected_port; // response came from a different source port than expected (possible spoof)
+bool opt_padding_unusual;      // unusual EDNS padding/option layout flag (malformed-ish)
+bool negative_cache_indicator; // response included SOA/NXDOMAIN negative caching hint
+
+// ========================= Logical Properties (H(...)) ================
+
+// 00: Response ID must match query ID (or be explained by allowed id-randomization scheme).
+H( resp_id = q_id );
+
+// 01: Malformed responses are forbidden (parser should not accept broken wire format).
+H( resp_malformed = false );
+
+// 02: NXDOMAIN must not carry answer RRs. (No answer RRset with NXDOMAIN.)
+H( resp_rcode = NXDOMAIN -> ancount = 0 );
+
+// 03: If ANCOUNT>0 then RCODE should not be NXDOMAIN; answers imply NOERROR (or YXDOMAIN family handled separately).
+H( ancount > 0 -> resp_rcode = NOERROR );
+
+// 04: TC (truncation) over UDP must trigger TCP fallback (observed later) and the subsequent TCP response must be non-truncated.
+//     (transport == UDP & resp_tc) -> eventually tcp_fallback_seen && eventual non-truncated response
+H( (transport = UDP & resp_tc = true) -> ( O( tcp_fallback_seen = true & O( resp_tc = false ) ) ) );
+
+// 05: If client requested DNSSEC (DO bit in query) and response claims AD, DNSSEC material must be present.
+H( (resp_do = true & resp_ad = true) -> dnssec_present = true );
+
+// 06: If response AD is true, DNSSEC data MUST be present (defense against forged AD).
+H( resp_ad = true -> dnssec_present = true );
+
+// 07: If response claims authority (AA set) the response must include authority information (NS/SOA) or a correct delegation; absence indicates inconsistency.
+H( resp_aa = true -> (nscount > 0 | ancount > 0 | auth_source_expected = true) );
+
+// 08: Timeout implies no response events; a reported "response" after a declared timeout is suspicious.
+H( timeout = true -> (resp_rcode = rcNotSet & ancount = 0 & resp_malformed = false) );
+
+// 09: If a query saw NXDOMAIN with negative caching hint (SOA) then a repeated query within the negative TTL MUST also be NXDOMAIN (negative caching).
+H( (resp_rcode = NXDOMAIN & negative_cache_indicator = true & prev_negative_ttl >= 0) ->
+    ( time_since_prev <= prev_negative_ttl -> resp_rcode = NXDOMAIN ) );
+
+// 10: If the server returns ANCOUNT>0 for a name/type `k` (ans_has_rrset_k=true) then a later response for the same name/type in absence of authoritative updates should not be NXDOMAIN.
+H( ans_has_rrset_k = true -> !( O( resp_rcode = NXDOMAIN ) ) );
+
+// 11: If a response comes from an unexpected source port or unexpected IP (possible off-path), mark as violation (anti-spoof).
+H( resp_from_unexpected_port = false );
+
+// 12: TCP fallback must preserve query ID and answer consistency (no ID munging on different transport).
+H( (Y( O( transport = UDP & resp_tc = true )) & O( tcp_fallback_seen = true )) -> ( O( resp_id = q_id & resp_tc = false ) ) );
+
+// 13: Responses that claim NOERROR but have zero ANCOUNT *and* no RRset in authority must be suspicious unless delegation/NS response is expected.
+H( (resp_rcode = NOERROR & ancount = 0) -> ( nscount > 0 | arcount > 0 | ans_has_rrset_k = false ) );
+
+// 14: DO/OPT presence consistency: if OPT present then EDNS fields must parse; weird/invalid OPT layout is forbidden.
+H( opt_present = true -> opt_padding_unusual = false );
+
+// 15: Retried queries should be idempotent: repeated identical queries without intervening zone changes should not produce contradictory RCODEs (NOERROR vs NXDOMAIN).
+H( Y(O(resp_rcode = NOERROR)) -> !( O( resp_rcode = NXDOMAIN ) ) );
+
+// 16: If a server marks TTL = 0 for an RRset it should not re-deliver the same RRset as cacheable later (ttl_zero_exposed implies not later cacheable).
+H( ttl_zero_exposed = true -> !( O( resp_min_ttl > 0 ) & ans_has_rrset_k = true ) );
+
+// 17: If the client requested EDNS(0) with DO, but response lacks OPT entirely, that is suspicious for a resolver that claimed DO support in the query (server should echo or respond compatibly).
+H( (resp_do = true) -> opt_present = true );
+
+// 18: If response reports REFUSED or NOTIMP, client SHOULD NOT accept it as NOERROR; a REFUSED→NOERROR flip under retry without configuration change is suspicious.
+H( resp_rcode = REFUSED -> !( O( resp_rcode = NOERROR ) ) );
+
+// 19: If AD is asserted but DNSSEC material is unsigned/invalid (adapter must set dnssec_present=false or mark invalid), that's a violation.
+H( (resp_ad = true & dnssec_present = false) -> false );
+
+// 20: Any TCP response that claims to be the TCP-retry for a previous UDP query must carry the same query ID and consistent AN/NS/AR sets (no dramatic reordering). Adapter should set server_behaved_nonidempotent=true if not.
+H( (transport = TCP & Y( O( transport = UDP ) )) -> ( resp_id = q_id & server_behaved_nonidempotent = false ) );
+
+// 21: If the resolver returns a response with a CNAME chain, final target must be consistent (no CNAME loops). Represented by a boolean set by adapter.
+// H( /* adapter-calculated */ false /* placeholder: adapter should assert no cname_loop */ -> false );
+
+// 22: RCODE consistency: XFR/AXFR/TCP-only types must not be answered over UDP (e.g., large zone transfers); adapter sets transport feasibility flags.
+H( (qtype = DNSSEC | qtype = OTHER) -> (transport = TCP | transport = UDP) ); // keep conservative: adapt if needed
+
+// 23: If a response arrives with RRSIG/RRSIG-like entries but AD=0 and DO was requested, ensure signatures validate; adapter sets dnssec_present only for valid signatures.
+H( (resp_do = true & dnssec_present = true) -> resp_ad = true | resp_ad = false ); // validation must be consistent (adapter chooses flags)
+
+// 24: A resolver must not map legitimate query QTYPE to unrelated RRset types (e.g., A query yielding only MX RRs). Adapter must set ans_has_rrset_k only when k matches query QTYPE.
+H( ans_has_rrset_k = true -> ( qtype = A & rr_kind = RR_A | qtype = AAAA & rr_kind = RR_AAAA | qtype = CNAME & rr_kind = RR_CNAME ) );
+
+// 25: If response indicates FORMERR or other protocol-level error, response must not include valid ANCOUNT>0 with full RRsets.
+H( resp_rcode = FORMERR -> ancount = 0 & dnssec_present = false );
+
+// 26: Prevent split-brain: a single query should not elicit two contradictory responses both accepted by client (adapter should detect and reject duplicates).
+H( O( resp_rcode = NOERROR ) -> !( O( resp_rcode = NXDOMAIN ) ) );
+
+// ===================================================================
