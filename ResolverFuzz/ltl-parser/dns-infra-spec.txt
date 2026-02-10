@@ -1,0 +1,364 @@
+// ========================= Declarations =========================
+// dns-infra-spec.txt - LTL properties for ResolverFuzz
+// Includes forward-mode bug detection properties from USENIX paper
+
+// Enums for query / response types and codes
+enum q_transport  {transNotSet, UDP, TCP};
+enum q_type       {qNotSet, A, AAAA, CNAME, NS, MX, TXT, ANY, OPT, DNSSEC, OTHER};
+enum rcode        {rcNotSet, NOERROR, NXDOMAIN, SERVFAIL, FORMERR, NOTIMP, REFUSED, YXDOMAIN};
+enum rr_kind      {rrNotSet, RR_A, RR_AAAA, RR_CNAME, RR_NS, RR_MX, RR_RRSIG, RR_DNSKEY, RR_DS, RR_OTHER};
+
+// Test orchestration context
+enum mode         {modeNotSet, CDNS, CDNS_FALLBACK, FWD_GLOBAL, RECURSIVE};
+enum resolver     {resNotSet, BIND9, UNBOUND, KNOT, POWERDNS, TECHNITIUM, MARADNS};
+
+// ---------------- Integers ----------------
+int q_id;               // query ID
+int resp_id;            // response ID
+int ancount;            // answer count in response
+int nscount;            // ns count
+int arcount;            // additional count
+int resp_min_ttl;       // min TTL observed in returned RRsets (or -1 if none)
+int prev_negative_ttl;  // from previous NXDOMAIN reply (seconds), -1 if none
+int time_since_prev;    // seconds since previous same (name,type) query
+int resp_port;          // source port used in response
+int unit_no;            // RF unit index
+int round_no;           // RF round index
+int cache_min_ttl;      // min TTL found in cache for (name,type) this round (-1 if none)
+
+// Forward-mode bug detection integers
+int resp_size;               // response size in bytes (CP3/RC5)
+int out_of_bailiwick_count;  // count of out-of-bailiwick records (CP1)
+int unsolicited_ns_count;    // count of unsolicited NS records (CP4)
+int unsolicited_a_count;     // count of unsolicited A/AAAA records (CP4)
+int invalid_authority_types; // count of invalid types in authority (RC2)
+int cname_chase_count;       // number of CNAME chases (RC4)
+int udp_query_count;         // UDP queries issued by resolver (RC6)
+int tcp_query_count;         // TCP queries issued by resolver (RC7)
+int max_upstream_resp_size;  // max UDP response size from upstream (CP3)
+int cached_ns_count;         // NS records found in cache (CP4)
+int cached_a_count;          // A/AAAA records found in cache (CP4)
+
+// ---------------- Booleans ----------------
+// Core DNS semantics
+bool resp_tc;                  // TC flag (truncated)
+bool resp_ad;                  // AD flag (authentic data)
+bool resp_do;                  // DO bit observed in response
+bool query_do;                 // DO bit set in the client's query
+bool query_rd;                 // RD bit set in the client's query (RC3)
+bool resp_aa;                  // AA (authoritative) flag set
+bool resp_malformed;           // wire parsing error
+bool tcp_fallback_seen;        // client attempted TCP fallback
+bool timeout;                  // no response within window
+bool dnssec_present;           // valid DNSSEC material present
+bool opt_present;              // EDNS OPT present
+bool id_mismatch;              // resp_id != q_id
+bool server_behaved_nonidempotent; // contradictory AN/NS/AR across retry
+bool ttl_zero_exposed;         // any RR with TTL == 0 in answer
+bool resp_from_unexpected_port;// anti-spoof: response source port unexpected
+bool opt_padding_unusual;      // malformed/odd EDNS padding/options
+bool negative_cache_indicator; // NXDOMAIN + SOA (neg cache hint)
+bool any_ans_rrset_present;    // true if ancount > 0
+bool cname_loop_detected;      // CNAME loop detected (RC4)
+
+// Forward-mode bug detection booleans
+bool out_of_bailiwick_cached;    // CP1: out-of-bailiwick records cached
+bool has_unsolicited_ns;         // CP4: unsolicited NS in auth/additional
+bool has_unsolicited_glue;       // CP4: unsolicited A/AAAA in additional
+bool has_invalid_authority;      // RC2: invalid types in authority section
+bool resp_exceeds_1232;          // CP3/RC5: response > 1232 bytes
+bool resp_exceeds_4096;          // CP3/RC5: response > 4096 bytes
+bool excessive_cname_chase;      // RC4: CNAME chase > threshold (10)
+bool excessive_udp_queries;      // RC6: UDP queries > threshold (5)
+bool excessive_tcp_queries;      // RC7: TCP queries > threshold (5)
+bool rd_zero_but_forwarded;      // RC3: forwarded despite RD=0
+bool large_upstream_accepted;    // CP3: accepted large upstream response
+bool out_of_bailiwick_in_cache;  // CP1: out-of-bailiwick found in cache dump
+bool invalid_types_in_cache;     // RC2: invalid types found in cache dump
+
+// RF infrastructure observability
+bool query_payload_sent;         // query.txt present & parsed
+bool auth_payload_deployed;      // auth_payload.txt deployed to attacker NS
+
+// DNSTap
+bool dnstap_query_seen;          // client query observed
+bool dnstap_response_seen;       // matching response observed
+
+// Per-resolver PCAP
+bool pcap_udp_query_seen;        // UDP query from resolver container
+bool pcap_tcp_retry_seen;        // TCP fallback attempt seen
+bool pcap_response_seen;         // any response packet seen
+
+// Authoritative-side
+bool auth_ns_query_seen;         // resolver queried attacker-controlled auth
+bool auth_ns_response_seen;      // attacker auth responded
+bool auth_target_correct;        // target IP equals 172.22.201.[unit_no]
+bool auth_source_expected;       // response came from expected authoritative source
+
+// Forwarding behavior
+bool forwarder_query_seen;       // resolver forwarded to global forwarder
+bool unexpected_external_query;  // egress to unexpected IP ranges
+
+// response.txt / logs
+bool response_txt_present;       // response.txt parsed
+bool response_timeout_reported;  // response.txt says timeout
+bool response_tcp_used;          // response.txt indicates TCP was used
+bool log_error_seen;             // resolver log shows generic error
+bool log_tcp_fallback_decided;   // log shows TCP retry decision
+bool log_formerr_or_notimp;      // log shows FORMERR/NOTIMP
+
+// Caches
+bool cache_written;              // cache file updated this round
+bool cache_neg_present;          // negative cache entry present for name/type
+bool any_cache_rrset_present;    // any cache_has_rrset_<hash>=true emitted this round
+
+
+// ========================= Logical Properties (H(...)) ================
+
+// =====================================================================
+// CACHE POISONING PROPERTIES (CP1-CP4)
+// =====================================================================
+
+// CP1: Out-of-bailiwick cache poisoning
+// In forward mode, resolver should NOT cache records outside the queried zone's bailiwick.
+// BIND, Knot, Technitium are vulnerable per paper.
+// Property 50
+H( out_of_bailiwick_cached = false );
+
+// CP1-cache: Out-of-bailiwick records found in cache dump
+// Property 51
+H( out_of_bailiwick_in_cache = false );
+
+// CP2: In-bailiwick cache poisoning (PowerDNS specific)
+// PowerDNS searches cache for NS before forwarding, enabling in-bailiwick poisoning.
+// In FWD_GLOBAL mode, PowerDNS should still forward, not use cached NS.
+// Property 52
+H( (mode = FWD_GLOBAL) -> forwarder_query_seen = true );
+
+// CP3: Fragmentation-based cache poisoning
+// Resolver should not accept UDP responses > 1232 bytes from upstream.
+// BIND, Unbound, Knot accept up to 4096 bytes per paper.
+// Property 53
+H( large_upstream_accepted = false );
+
+// CP4: Iterative subdomain caching
+// Resolver should not blindly cache unsolicited NS/A records.
+// All resolvers are vulnerable per paper (MaraDNS, Technitium use ref-response).
+// Property 54 - detect unsolicited NS caching
+H( (mode = FWD_GLOBAL & has_unsolicited_ns = true) -> cache_written = false );
+
+// Property 55 - detect unsolicited glue caching
+H( (mode = FWD_GLOBAL & has_unsolicited_glue = true) -> cache_written = false );
+
+
+// =====================================================================
+// RESOURCE CONSUMPTION PROPERTIES (RC1-RC7)
+// =====================================================================
+
+// RC1: Excessive cache search operations (PowerDNS)
+// Hard to detect externally - PowerDNS does 3x cache lookups per label.
+// No direct property - would need instrumentation.
+
+// RC2: Unlimited cache store operations (Unbound)
+// Should not cache invalid record types in authority section.
+// RFC allows only NS, SOA, and DNSSEC types in authority.
+// Property 56
+H( has_invalid_authority = false );
+
+// RC2-cache: Invalid types found in cache dump
+// Property 57
+H( invalid_types_in_cache = false );
+
+// RC3: Ignoring the RD flag (Unbound, PowerDNS)
+// If client query has RD=0, resolver should NOT forward in forward mode.
+// Property 58
+H( rd_zero_but_forwarded = false );
+
+// RC4: Following a self-CNAME reference
+// MaraDNS (113x), Technitium (289x) chase CNAME loops excessively.
+// Normal is 2-3 chases. Threshold set at 10.
+// Property 59
+H( excessive_cname_chase = false );
+
+// RC4-loop: Direct CNAME loop detection
+// Property 60
+H( cname_loop_detected = false );
+
+// RC5: Large responses to clients (Unbound)
+// Unbound allows 4096 byte UDP responses, others limit to 1232.
+// Property 61
+H( resp_exceeds_1232 = false );
+
+// RC5-extreme: Extremely large responses
+// Property 62
+H( resp_exceeds_4096 = false );
+
+// RC6: Overlong waiting time over UDP (Unbound)
+// Unbound issues 9 queries and waits 17 seconds for malformed response.
+// Normal is 1-2 queries. Threshold set at 5.
+// Property 63
+H( excessive_udp_queries = false );
+
+// RC7: Excessive queries for resolution over TCP (Knot)
+// Knot issues 100 TCP queries instead of 5 maximum.
+// Property 64
+H( excessive_tcp_queries = false );
+
+
+// =====================================================================
+// BASE SEMANTIC RULES (Properties 02-26)
+// =====================================================================
+
+// 02 - NXDOMAIN should have no answers
+H( rcode = NXDOMAIN -> ancount = 0 );
+
+// 03 - Answers imply NOERROR
+H( ancount > 0 -> rcode = NOERROR );
+
+// 04 - TC flag should trigger TCP fallback
+H( (q_transport = UDP & resp_tc = true) -> ( O( tcp_fallback_seen = true & O( resp_tc = false ) ) ) );
+
+// 05 - DO + AD requires DNSSEC
+H( (query_do = true & resp_ad = true) -> dnssec_present = true );
+
+// 06 - AD flag requires DNSSEC (duplicate of 19, keeping for compatibility)
+H( resp_ad = true -> dnssec_present = true );
+
+// 07 - AA flag validation
+H( resp_aa = true -> (nscount > 0 | ancount > 0 | auth_source_expected = true) );
+
+// 08 - Timeout implies no valid response
+H( timeout = true -> (rcode = rcNotSet & ancount = 0 & resp_malformed = false) );
+
+// 09 - Negative caching TTL consistency
+H( (rcode = NXDOMAIN & negative_cache_indicator = true & prev_negative_ttl >= 0) ->
+    ( time_since_prev <= prev_negative_ttl -> rcode = NXDOMAIN ) );
+
+// 11 - Response from expected port
+H( resp_from_unexpected_port = false );
+
+// 12 - TCP fallback should get valid response
+H( (Y( O( q_transport = UDP & resp_tc = true )) & O( tcp_fallback_seen = true )) -> ( O( resp_id = q_id & resp_tc = false ) ) );
+
+// 13 - NOERROR with no answers should have authority/additional
+H( (rcode = NOERROR & ancount = 0) -> ( nscount > 0 | arcount > 0 | any_ans_rrset_present = false ) );
+
+// 17 - DO query requires OPT in response
+H( (query_do = true) -> opt_present = true );
+
+// 19 - AD flag without DNSSEC is invalid
+H( !(resp_ad = true & dnssec_present = false));
+
+// 20 - TCP retry should be idempotent
+H( (q_transport = TCP & Y( O( q_transport = UDP ) )) -> ( resp_id = q_id & server_behaved_nonidempotent = false ) );
+
+// 21 - No CNAME loops (redundant with RC4 but kept for compatibility)
+H( cname_loop_detected = false );
+
+// 22 - DNSSEC queries need transport
+H( (q_type = DNSSEC | q_type = OTHER) -> (q_transport = TCP | q_transport = UDP) );
+
+// 23 - DO + DNSSEC response validation
+H( (resp_do = true & dnssec_present = true) -> (resp_ad = true | resp_ad = false) );
+
+// 24 - Answer type matches query type
+H( any_ans_rrset_present = true ->
+    ( (q_type = A     & rr_kind = RR_A)
+    | (q_type = AAAA  & rr_kind = RR_AAAA)
+    | (q_type = CNAME & rr_kind = RR_CNAME)
+    | (q_type = NS    & rr_kind = RR_NS)
+    | (q_type = MX    & rr_kind = RR_MX)
+    | (q_type = TXT   & rr_kind = RR_OTHER)
+    | (q_type = ANY)
+    | (q_type = OTHER) ) );
+
+// 25 - FORMERR should have no answers or DNSSEC
+H( rcode = FORMERR -> (ancount = 0 & dnssec_present = false) );
+
+
+// =====================================================================
+// INFRASTRUCTURE-AWARE RULES (Properties 28-49)
+// =====================================================================
+
+// 28 - Timeout consistency
+H( response_timeout_reported = true -> (pcap_response_seen = false & dnstap_response_seen = false) );
+
+// 29 - TC flag should trigger observable TCP
+H( (q_transport = UDP & resp_tc = true) -> (pcap_tcp_retry_seen = true | log_tcp_fallback_decided = true | response_tcp_used = true) );
+
+// 30 - FWD_GLOBAL mode: must forward, must NOT query auth directly
+H( mode = FWD_GLOBAL -> (forwarder_query_seen = true & auth_ns_query_seen = false) );
+
+// 31 - RECURSIVE mode: must query auth, not forwarder
+H( mode = RECURSIVE -> (auth_ns_query_seen = true & auth_target_correct = true & forwarder_query_seen = false) );
+
+// 32 - CDNS mode: must query auth, not forwarder
+H( mode = CDNS -> (auth_ns_query_seen = true & auth_target_correct = true & forwarder_query_seen = false) );
+
+// 33 - CDNS_FALLBACK: forward only on failure
+H( mode = CDNS_FALLBACK ->
+   ( forwarder_query_seen = false
+     | (response_timeout_reported = true | rcode = SERVFAIL | rcode = FORMERR) ) );
+
+// 34 - Response file consistency
+H( (response_txt_present = true & response_timeout_reported = false) -> (pcap_response_seen = true | dnstap_response_seen = true) );
+
+// 35 - No unexpected external queries
+H( unexpected_external_query = false );
+
+// 36 - AA flag implies auth was queried
+H( (resp_aa = true) -> auth_ns_query_seen = true );
+
+// 37 - Successful response should update cache
+H( (rcode = NOERROR & ancount > 0) -> cache_written = true );
+
+// 38 - Successful response should have cache RRsets
+H( (rcode = NOERROR & ancount > 0) -> any_cache_rrset_present = true );
+
+// 39 - NXDOMAIN with SOA should create negative cache
+H( (rcode = NXDOMAIN & negative_cache_indicator = true) -> cache_neg_present = true );
+
+// 40 - Cache written implies valid TTL
+H( cache_written = true -> (cache_min_ttl >= 0) );
+
+// 41 - Log error implies non-NOERROR
+H( log_formerr_or_notimp = true -> rcode != NOERROR );
+
+// 42 - No TCP fallback without TC
+H( (pcap_tcp_retry_seen = false & log_tcp_fallback_decided = false) -> resp_tc = false );
+
+// 43 - DNSTap response implies response file
+H( dnstap_response_seen = true -> response_txt_present = true );
+
+// 44 - Auth query target validation
+H( auth_ns_query_seen = true -> auth_target_correct = true );
+
+// 45 - CDNS: auth response means no forwarding
+H( (mode = CDNS & auth_ns_response_seen = true) -> forwarder_query_seen = false );
+
+// 46 - TCP fallback logged but not observed implies timeout
+H( (log_tcp_fallback_decided = true & pcap_tcp_retry_seen = false) -> response_timeout_reported = true );
+
+// 47 - TCP retry should clear TC
+H( pcap_tcp_retry_seen = true -> resp_tc = false );
+
+// 48 - Query-response consistency
+H( !(dnstap_query_seen = true & dnstap_response_seen = false & response_timeout_reported = false) );
+
+// 49 - Successful response should be observable
+H( (rcode = NOERROR & ancount > 0) -> pcap_response_seen = true );
+
+
+// =====================================================================
+// SUMMARY: Forward-mode bugs detected by properties
+// =====================================================================
+// CP1: 50, 51 (out-of-bailiwick)
+// CP2: 52 (forward mode must forward) 
+// CP3: 53 (large upstream responses)
+// CP4: 54, 55 (unsolicited NS/A caching)
+// RC2: 56, 57 (invalid authority types)
+// RC3: 58 (RD=0 forwarding)
+// RC4: 59, 60 (CNAME loops)
+// RC5: 61, 62 (large client responses)
+// RC6: 63 (excessive UDP queries)
+// RC7: 64 (excessive TCP queries)

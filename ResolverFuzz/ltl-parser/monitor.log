@@ -1,0 +1,306 @@
+
+========================================
+[MONITOR] Started at 1768681472
+========================================
+[MONITOR] Initializing...
+[MONITOR] Loading spec: live555.txt
+[MONITOR] Protocol tag: generic
+[MONITOR] Parsing LTL specification...
+[MONITOR] Building type checker and evaluator...
+[MONITOR] Loaded 35 LTL properties:
+  [0] H(rtsp_method==TEARDOWN & status_class==SUCCESS -> teardown_for_existing_session==true)
+  [1] H(session_established==true -> session_id_changed==false)
+  [2] H(rtsp_method==PLAY & status_class==SUCCESS -> all_tracks_setup==true)
+  [3] H(timeout==true -> !(O(status_class==SUCCESS)))
+  [4] H(session_established==true -> session_id_changed==false)
+  [5] H(session_established==true -> session_id_changed==false)
+  [6] H(timeout==true -> !(status_class==SUCCESS))
+  [7] H(timeout==true -> !(status_class==SUCCESS))
+  [8] H(timeout==true -> !(status_class==SUCCESS))
+  [9] H(timeout==true -> !(O(status_class==SUCCESS)))
+  [10] H(session_established==true -> session_id_changed==false)
+  [11] H(rtsp_method==TEARDOWN & session_established==false -> status_class != SUCCESS)
+  [12] H(rtsp_method==SETUP & status_class==SUCCESS & transport_req_udp==true -> transport_resp_tcp==false)
+  [13] H(rtsp_method==TEARDOWN & status_class==SUCCESS -> teardown_for_existing_session==true)
+  [14] H(rtsp_method==TEARDOWN & teardown_without_session==true -> !(status_class==SUCCESS))
+  [15] H(rtsp_method==TEARDOWN & teardown_without_session==true -> !(status_class==SUCCESS))
+  [16] H(rtsp_method==TEARDOWN & teardown_without_session==true -> !(status_class==SUCCESS))
+  [17] H(session_established==true -> session_id_changed==false)
+  [18] H(timeout==true -> !(O(status_class==SUCCESS)))
+  [19] H(session_established==true -> Y(O(rtsp_method==SETUP & status_class==SUCCESS & resp_has_session==true)))
+  [20] H(session_established==true -> session_id_changed==false)
+  [21] H(session_established==true -> session_id_changed==false)
+  [22] H(rtsp_method==SETUP & status_class==SUCCESS & transport_req_udp==true -> transport_resp_tcp==false)
+  [23] H(session_established==true -> O(rtsp_method==SETUP & status_class==SUCCESS))
+  [24] H(session_established==true -> session_id_changed==false)
+  [25] H(rtsp_method==SETUP & status_class==SUCCESS & transport_req_udp==true -> transport_resp_tcp==false)
+  [26] H(session_established==true -> session_id_changed==false)
+  [27] H(rtsp_method==SETUP & status_class==SUCCESS & transport_req_udp==true -> transport_resp_tcp==false)
+  [28] H(session_established==true -> session_id_changed==false)
+  [29] H(session_established==true -> session_id_changed==false)
+  [30] H(session_established==true -> session_id_changed==false)
+  [31] H(rtsp_method==TEARDOWN & teardown_without_session==true -> !(status_class==SUCCESS))
+  [32] H(rtsp_method==TEARDOWN & teardown_without_session==true -> !(status_class==SUCCESS))
+  [33] H(rtsp_method==SETUP & status_class==SUCCESS & transport_req_udp==true -> transport_resp_tcp==false)
+  [34] H(rtsp_method==SETUP & status_class==SUCCESS & transport_req_udp==true -> transport_resp_tcp==false)
+[MONITOR] Ready to receive events from stdin
+
+========================================
+[MONITOR] Started at 1770143635
+========================================
+[MONITOR] Initializing...
+
+========================================
+[MONITOR] Started at 1770143648
+========================================
+[MONITOR] Initializing...
+[MONITOR] Loading spec: ../monitor-bin/dtls.ltl
+[MONITOR] Protocol tag: generic
+[MONITOR] Parsing LTL specification...
+[MONITOR] Building type checker and evaluator...
+[MONITOR] Loaded 5 LTL properties:
+  [0] <unknown property>
+  [1] <unknown property>
+  [2] <unknown property>
+  [3] <unknown property>
+  [4] <unknown property>
+[MONITOR] Ready to receive events from stdin
+[EVENT] ❯ ls | Predicates: 
+
+========================================
+[MONITOR] Started at 1770143675
+========================================
+[MONITOR] Initializing...
+[MONITOR] Loading spec: ../monitor-bin/dtls.ltl
+[MONITOR] Protocol tag: generic
+[MONITOR] Parsing LTL specification...
+[MONITOR] Building type checker and evaluator...
+[MONITOR] Loaded 5 LTL properties:
+  [0] <unknown property>
+  [1] <unknown property>
+  [2] <unknown property>
+  [3] <unknown property>
+  [4] <unknown property>
+[MONITOR] Ready to receive events from stdin
+[EVENT] msg_id=722 alert_description=0 alert_level=0 cipher_negotiated=false request=requestNotSet content_type=22 response=s2c_HelloVerifyRequest handshake_type=3 cookie_present=false sequence=0 encrypted=false cookie_valid=false handshake_complete=false fragment_length=19 mac_ok=true epoch=0 record_length=31 | Predicates: record_length=31, epoch=0, mac_ok=true, fragment_length=19, msg_id=722, alert_level=0, request=requestNotSet, content_type=22, alert_description=0, response=s2c_HelloVerifyRequest, cipher_negotiated=false, handshake_type=3, cookie_present=false, sequence=0, encrypted=false, cookie_valid=false, handshake_complete=false
+
+========================================
+[MONITOR] Started at 1770143699
+========================================
+[MONITOR] Initializing...
+[MONITOR] Loading spec: ../monitor-bin/dtls.ltl
+[MONITOR] Protocol tag: generic
+[MONITOR] Parsing LTL specification...
+[MONITOR] Building type checker and evaluator...
+[MONITOR] Loaded 5 LTL properties:
+  [0] <unknown property>
+  [1] <unknown property>
+  [2] <unknown property>
+  [3] <unknown property>
+  [4] <unknown property>
+[MONITOR] Ready to receive events from stdin
+[EVENT] alert_description=0 alert_level=0 cipher_negotiated=false request=requestNotSet content_type=22 response=s2c_HelloVerifyRequest handshake_type=3 cookie_present=false sequence=0 encrypted=false cookie_valid=false handshake_complete=false fragment_length=19 mac_ok=true epoch=0 record_length=31 | Predicates: record_length=31, epoch=0, alert_description=0, response=s2c_HelloVerifyRequest, alert_level=0, request=requestNotSet, content_type=22, mac_ok=true, fragment_length=19, cipher_negotiated=false, handshake_type=3, cookie_present=false, sequence=0, encrypted=false, cookie_valid=false, handshake_complete=false
+[EVENT] alert_description=0 alert_level=0 cipher_negotiated=false request=requestNotSet content_type=22 response=s2c_HelloVerifyRequest handshake_type=3 cookie_present=false sequence=0 encrypted=false cookie_valid=false handshake_complete=false fragment_length=19 mac_ok=true epoch=0 record_length=31 | Predicates: record_length=31, epoch=0, alert_description=0, response=s2c_HelloVerifyRequest, alert_level=0, request=requestNotSet, content_type=22, mac_ok=true, fragment_length=19, cipher_negotiated=false, handshake_type=3, cookie_present=false, sequence=0, encrypted=false, cookie_valid=false, handshake_complete=false
+
+========================================
+[MONITOR] Started at 1770143804
+========================================
+[MONITOR] Initializing...
+[MONITOR] Loading spec: ../monitor-bin/dtls.ltl
+[MONITOR] Protocol tag: generic
+[MONITOR] Parsing LTL specification...
+[MONITOR] Building type checker and evaluator...
+[MONITOR] Loaded 5 LTL properties:
+  [0] <unknown property>
+  [1] <unknown property>
+  [2] <unknown property>
+  [3] <unknown property>
+  [4] <unknown property>
+[MONITOR] Ready to receive events from stdin
+[EVENT] alert_description=0 alert_level=0 cipher_negotiated=false request=requestNotSet content_type=22 response=s2c_HelloVerifyRequest handshake_type=3 cookie_present=false sequence=0 encrypted=false cookie_valid=false handshake_complete=false fragment_length=19 mac_ok=true epoch=0 record_length=31 | Predicates: record_length=31, epoch=0, alert_description=0, response=s2c_HelloVerifyRequest, alert_level=0, request=requestNotSet, content_type=22, mac_ok=true, fragment_length=19, cipher_negotiated=false, handshake_type=3, cookie_present=false, sequence=0, encrypted=false, cookie_valid=false, handshake_complete=false
+[EVENT] alert_description=0 alert_level=0 cipher_negotiated=false request=requestNotSet content_type=22 response=s2c_HelloVerifyRequest handshake_type=3 cookie_present=false sequence=0 encrypted=false cookie_valid=false handshake_complete=false fragment_length=19 mac_ok=true epoch=0 record_length=31 | Predicates: record_length=31, epoch=0, alert_description=0, response=s2c_HelloVerifyRequest, alert_level=0, request=requestNotSet, content_type=22, mac_ok=true, fragment_length=19, cipher_negotiated=false, handshake_type=3, cookie_present=false, sequence=0, encrypted=false, cookie_valid=false, handshake_complete=false
+
+========================================
+[MONITOR] Started at 1770143816
+========================================
+[MONITOR] Initializing...
+[MONITOR] Loading spec: ../monitor-bin/dtls.ltl
+[MONITOR] Protocol tag: generic
+[MONITOR] Parsing LTL specification...
+[MONITOR] Building type checker and evaluator...
+[MONITOR] Loaded 5 LTL properties:
+  [0] <unknown property>
+  [1] <unknown property>
+  [2] <unknown property>
+  [3] <unknown property>
+  [4] <unknown property>
+[MONITOR] Ready to receive events from stdin
+[EVENT] alert_description=0 alert_level=0 cipher_negotiated=false request=requestNotSet content_type=22 response=s2c_HelloVerifyRequest handshake_type=3 cookie_present=false sequence=0 encrypted=false cookie_valid=false handshake_complete=false fragment_length=19 mac_ok=true epoch=0 record_length=31 | Predicates: record_length=31, epoch=0, alert_description=0, response=s2c_HelloVerifyRequest, alert_level=0, request=requestNotSet, content_type=22, mac_ok=true, fragment_length=19, cipher_negotiated=false, handshake_type=3, cookie_present=false, sequence=0, encrypted=false, cookie_valid=false, handshake_complete=false
+[EVENT] alert_description=0 alert_level=0 cipher_negotiated=false request=requestNotSet content_type=22 response=s2c_HelloVerifyRequest handshake_type=3 cookie_present=false sequence=0 encrypted=false cookie_valid=false handshake_complete=false fragment_length=19 mac_ok=true epoch=0 record_length=31 | Predicates: record_length=31, epoch=0, alert_description=0, response=s2c_HelloVerifyRequest, alert_level=0, request=requestNotSet, content_type=22, mac_ok=true, fragment_length=19, cipher_negotiated=false, handshake_type=3, cookie_present=false, sequence=0, encrypted=false, cookie_valid=false, handshake_complete=false
+
+========================================
+[MONITOR] Started at 1770143829
+========================================
+[MONITOR] Initializing...
+[MONITOR] Loading spec: ../monitor-bin/dtls.ltl
+[MONITOR] Protocol tag: generic
+[MONITOR] Parsing LTL specification...
+[MONITOR] Building type checker and evaluator...
+[MONITOR] Loaded 5 LTL properties:
+  [0] <unknown property>
+  [1] <unknown property>
+  [2] <unknown property>
+  [3] <unknown property>
+  [4] <unknown property>
+[MONITOR] Ready to receive events from stdin
+[EVENT] alert_description=0 alert_level=0 cipher_negotiated=false request=requestNotSet content_type=22 response=s2c_HelloVerifyRequest handshake_type=3 cookie_present=false sequence=0 encrypted=false cookie_valid=false handshake_complete=false fragment_length=19 mac_ok=true epoch=0 record_length=31 | Predicates: record_length=31, epoch=0, alert_description=0, response=s2c_HelloVerifyRequest, alert_level=0, request=requestNotSet, content_type=22, mac_ok=true, fragment_length=19, cipher_negotiated=false, handshake_type=3, cookie_present=false, sequence=0, encrypted=false, cookie_valid=false, handshake_complete=false
+
+========================================
+[MONITOR] Started at 1770143862
+========================================
+[MONITOR] Initializing...
+[MONITOR] Loading spec: ../monitor-bin/dtls.ltl
+[MONITOR] Protocol tag: generic
+[MONITOR] Parsing LTL specification...
+[MONITOR] Building type checker and evaluator...
+[MONITOR] Loaded 5 LTL properties:
+  [0] <unknown property>
+  [1] <unknown property>
+  [2] <unknown property>
+  [3] <unknown property>
+  [4] <unknown property>
+[MONITOR] Ready to receive events from stdin
+[EVENT] alert_description=10 alert_level=2 cipher_negotiated=true request=requestNotSet content_type=21 response=s2c_Alert handshake_type=10 cookie_present=false sequence=3 encrypted=false cookie_valid=false handshake_complete=false fragment_length=0 mac_ok=true epoch=0 record_length=2 | Predicates: record_length=2, epoch=0, alert_description=10, response=s2c_Alert, alert_level=2, request=requestNotSet, content_type=21, mac_ok=true, fragment_length=0, cipher_negotiated=true, handshake_type=10, cookie_present=false, sequence=3, encrypted=false, cookie_valid=false, handshake_complete=false
+
+========================================
+[MONITOR] Started at 1770143885
+========================================
+[MONITOR] Initializing...
+[MONITOR] Loading spec: ../monitor-bin/dtls.ltl
+[MONITOR] Protocol tag: generic
+[MONITOR] Parsing LTL specification...
+[MONITOR] Building type checker and evaluator...
+[MONITOR] Loaded 5 LTL properties:
+  [0] <unknown property>
+  [1] <unknown property>
+  [2] <unknown property>
+  [3] <unknown property>
+  [4] <unknown property>
+[MONITOR] Ready to receive events from stdin
+[EVENT] alert_description=10 alert_level=2 cipher_negotiated=true request=requestNotSet content_type=21 response=s2c_Alert handshake_type=10 cookie_present=false sequence=3 encrypted=false cookie_valid=false handshake_complete=fals | Predicates: handshake_complete=fals, encrypted=false, cookie_valid=false, sequence=3, cookie_present=false, handshake_type=10, cipher_negotiated=true, content_type=21, request=requestNotSet, alert_level=2, response=s2c_Alert, alert_description=10
+
+========================================
+[MONITOR] Started at 1770143923
+========================================
+[MONITOR] Initializing...
+[MONITOR] Loading spec: ../monitor-bin/dtls.ltl
+[MONITOR] Protocol tag: generic
+[MONITOR] Parsing LTL specification...
+[MONITOR] Building type checker and evaluator...
+[MONITOR] Loaded 5 LTL properties:
+  [0] <unknown property>
+  [1] <unknown property>
+  [2] <unknown property>
+  [3] <unknown property>
+  [4] <unknown property>
+[MONITOR] Ready to receive events from stdin
+[EVENT] alert_description=10 alert_level=2 cipher_negotiated=true request=requestNotSet content_type=21 response=s2c_Alert handshake_type=10 cookie_present=false sequence=3 encrypted=true cookie_valid=false handshake_complete=false fragment_length=0 mac_ok=true epoch=0 record_length=2 | Predicates: record_length=2, epoch=0, alert_description=10, response=s2c_Alert, alert_level=2, request=requestNotSet, content_type=21, mac_ok=true, fragment_length=0, cipher_negotiated=true, handshake_type=10, cookie_present=false, sequence=3, encrypted=true, cookie_valid=false, handshake_complete=false
+[MONITOR] *** VIOLATION DETECTED *** (1 rule(s), event #1)
+ - Rule #4: <unknown property>
+Violation context: record_length=2 epoch=0 alert_description=10 response=s2c_Alert alert_level=2 request=requestNotSet content_type=21 mac_ok=true fragment_length=0 cipher_negotiated=true handshake_type=10 cookie_present=false sequence=3 encrypted=true cookie_valid=false handshake_complete=false 
+[MONITOR] Exiting with code 2 (violation)
+
+========================================
+[MONITOR] Started at 1770149519
+========================================
+[MONITOR] Initializing...
+[MONITOR] Loading spec: dtls.txt
+[MONITOR] Protocol tag: dtls
+[MONITOR] ERROR: Could not open spec: dtls.txt
+
+========================================
+[MONITOR] Started at 1770149542
+========================================
+[MONITOR] Initializing...
+[MONITOR] Loading spec: dtls.txt
+[MONITOR] Protocol tag: dtls
+[MONITOR] Parsing LTL specification...
+[MONITOR] Building type checker and evaluator...
+[MONITOR] Loaded 5 LTL properties:
+  [0] <unknown property>
+  [1] <unknown property>
+  [2] <unknown property>
+  [3] <unknown property>
+  [4] <unknown property>
+[MONITOR] Ready to receive events from stdin
+[EVENT] request=requestNotSet response=s2c_HelloVerifyRequest content_type=22 handshake_type=3 cookie_present=false cookie_valid=false encrypted=false mac_ok=true epoch=0 sequence=0 record_length=31 fragment_length=19 handshake_complete=false cipher_negotiated=false alert_level=0 alert_description=0 msg_id=1 dir=S2C trace=16fefd0000000000000000001f030000130000000000000013fefd10bacf4fa50d61f0395ebb2deaa74f8ca9 | Predicates: trace=16fefd0000000000000000001f030000130000000000000013fefd10bacf4fa50d61f0395ebb2deaa74f8ca9, dir=S2C, msg_id=1, alert_description=0, alert_level=0, cipher_negotiated=false, request=requestNotSet, content_type=22, response=s2c_HelloVerifyRequest, handshake_type=3, cookie_present=false, sequence=0, encrypted=false, cookie_valid=false, handshake_complete=false, fragment_length=19, mac_ok=true, epoch=0, record_length=31
+
+========================================
+[MONITOR] Started at 1770149553
+========================================
+[MONITOR] Initializing...
+[MONITOR] Loading spec: dtls.txt
+[MONITOR] Protocol tag: dtls
+[MONITOR] Parsing LTL specification...
+[MONITOR] Building type checker and evaluator...
+[MONITOR] Loaded 5 LTL properties:
+  [0] <unknown property>
+  [1] <unknown property>
+  [2] <unknown property>
+  [3] <unknown property>
+  [4] <unknown property>
+[MONITOR] Ready to receive events from stdin
+[EVENT] request=requestNotSet response=s2c_HelloVerifyRequest content_type=22 handshake_type=3 cookie_present=false cookie_valid=false encrypted=false mac_ok=true epoch=0 sequence=0 record_length=31 fragment_length=19 handshake_complete=false cipher_negotiated=false alert_level=0 alert_description=0 msg_id=1 dir=S2C trace=16fefd0000000000000000001f030000130000000000000013fefd10bacf4fa50d61f0395ebb2deaa74f8ca9 | Predicates: trace=16fefd0000000000000000001f030000130000000000000013fefd10bacf4fa50d61f0395ebb2deaa74f8ca9, dir=S2C, msg_id=1, alert_description=0, alert_level=0, cipher_negotiated=false, request=requestNotSet, content_type=22, response=s2c_HelloVerifyRequest, handshake_type=3, cookie_present=false, sequence=0, encrypted=false, cookie_valid=false, handshake_complete=false, fragment_length=19, mac_ok=true, epoch=0, record_length=31
+
+========================================
+[MONITOR] Started at 1770149631
+========================================
+[MONITOR] Initializing...
+[MONITOR] Loading spec: dtls.txt
+[MONITOR] Protocol tag: dtls
+[MONITOR] Parsing LTL specification...
+[MONITOR] Building type checker and evaluator...
+[MONITOR] Loaded 5 LTL properties:
+  [0] <unknown property>
+  [1] <unknown property>
+  [2] <unknown property>
+  [3] <unknown property>
+  [4] <unknown property>
+[MONITOR] Ready to receive events from stdin
+[EVENT] request=c2s_ClientKeyExchange response=responseNotSet content_type=22 handshake_type=16 cookie_present=false cookie_valid=false encrypted=false mac_ok=true epoch=0 sequence=3 record_length=78 fragment_length=66 handshake_complete=false cipher_negotiated=false alert_level=0 alert_description=0 | Predicates: alert_description=0, alert_level=0, cipher_negotiated=false, request=c2s_ClientKeyExchange, content_type=22, response=responseNotSet, handshake_type=16, cookie_present=false, sequence=3, encrypted=false, cookie_valid=false, handshake_complete=false, fragment_length=66, mac_ok=true, epoch=0, record_length=78
+[EVENT] request=c2s_CertificateVerify response=responseNotSet content_type=22 handshake_type=15 cookie_present=false cookie_valid=false encrypted=false mac_ok=true epoch=0 sequence=4 record_length=86 fragment_length=74 handshake_complete=false cipher_negotiated=false alert_level=0 alert_description=0 | Predicates: alert_description=0, alert_level=0, cipher_negotiated=false, request=c2s_CertificateVerify, content_type=22, response=responseNotSet, handshake_type=15, cookie_present=false, sequence=4, encrypted=false, cookie_valid=false, handshake_complete=false, fragment_length=74, mac_ok=true, epoch=0, record_length=86
+
+========================================
+[MONITOR] Started at 1770149795
+========================================
+[MONITOR] Initializing...
+[MONITOR] Loading spec: dtls.txt
+[MONITOR] Protocol tag: dtls
+[MONITOR] Parsing LTL specification...
+[MONITOR] Building type checker and evaluator...
+[MONITOR] Loaded 5 LTL properties:
+  [0] <unknown property>
+  [1] <unknown property>
+  [2] <unknown property>
+  [3] <unknown property>
+  [4] <unknown property>
+[MONITOR] Ready to receive events from stdin
+[EVENT] request=c2s_ClientKeyExchange response=responseNotSet content_type=22 handshake_type=16 cookie_present=false cookie_valid=false encrypted=false mac_ok=true epoch=0 sequence=3 record_length=78 fragment_length=66 handshake_complete=false cipher_negotiated=false alert_level=0 alert_description=0 | Predicates: alert_description=0, alert_level=0, cipher_negotiated=false, request=c2s_ClientKeyExchange, content_type=22, response=responseNotSet, handshake_type=16, cookie_present=false, sequence=3, encrypted=false, cookie_valid=false, handshake_complete=false, fragment_length=66, mac_ok=true, epoch=0, record_length=78
+[EVENT] request=c2s_CertificateVerify response=responseNotSet content_type=22 handshake_type=15 cookie_present=false cookie_valid=false encrypted=false mac_ok=true epoch=0 sequence=4 record_length=86 fragment_length=74 handshake_complete=false cipher_negotiated=false alert_level=0 alert_description=0 | Predicates: alert_description=0, alert_level=0, cipher_negotiated=false, request=c2s_CertificateVerify, content_type=22, response=responseNotSet, handshake_type=15, cookie_present=false, sequence=4, encrypted=false, cookie_valid=false, handshake_complete=false, fragment_length=74, mac_ok=true, epoch=0, record_length=86
+
+========================================
+[MONITOR] Started at 1770149956
+========================================
+[MONITOR] Initializing...
+[MONITOR] Loading spec: dtls.txt
+[MONITOR] Protocol tag: dtls
+[MONITOR] Parsing LTL specification...
+[MONITOR] Building type checker and evaluator...
+[MONITOR] Loaded 5 LTL properties:
+  [0] <unknown property>
+  [1] <unknown property>
+  [2] <unknown property>
+  [3] <unknown property>
+  [4] <unknown property>
+[MONITOR] Ready to receive events from stdin
+[EVENT] request=requestNotSet response=s2c_HelloVerifyRequest content_type=22 handshake_type=3 cookie_present=false cookie_valid=false encrypted=false mac_ok=true epoch=0 sequence=0 record_length=31 fragment_length=19 handshake_complete=false cipher_negotiated=false alert_level=0 alert_description=0 msg_id=1 dir=S2C trace=16fefd0000000000000000001f030000130000000000000013fefd10bacf4fa50d61f0395ebb2deaa74f8ca9 | Predicates: trace=16fefd0000000000000000001f030000130000000000000013fefd10bacf4fa50d61f0395ebb2deaa74f8ca9, dir=S2C, msg_id=1, alert_description=0, alert_level=0, cipher_negotiated=false, request=requestNotSet, content_type=22, response=s2c_HelloVerifyRequest, handshake_type=3, cookie_present=false, sequence=0, encrypted=false, cookie_valid=false, handshake_complete=false, fragment_length=19, mac_ok=true, epoch=0, record_length=31
