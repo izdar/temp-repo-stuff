@@ -1,4 +1,4 @@
-To run SAERM, you must compile `hostapd` by following this tutorial:
+To run CFS, you must compile `hostapd` by following this tutorial:
 
 ## Using simulated Wi-Fi interfaces
 
