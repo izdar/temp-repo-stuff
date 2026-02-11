@@ -11609,8 +11609,6 @@ int main(int argc, char** argv) {
           const char *eval_path = getenv("LTL_EVAL_PATH");
           const char *spec_path = getenv("LTL_SPEC_PATH");
           
-          eval_path = "/home/pirwani/SNPSFuzzer/formula_parser";
-          spec_path = "/home/pirwani/SNPSFuzzer/monitor-bin/rtsp.txt";
           
           g_monitor = monitor_start(eval_path, spec_path, "rtsp");
           if (g_monitor) {
@@ -11626,11 +11624,9 @@ int main(int argc, char** argv) {
       } else if (!strcmp(optarg, "FTP")) {
         // Initialize monitor for FTP
         if (!g_monitor_initialized) {
-          // const char *eval_path = getenv("LTL_EVAL_PATH");
-          // const char *spec_path = getenv("LTL_SPEC_PATH");
+          const char *eval_path = getenv("LTL_EVAL_PATH");
+          const char *spec_path = getenv("LTL_SPEC_PATH");
           
-          const char* eval_path = "/home/pirwani/SNPSFuzzer/formula_parser";
-          const char* spec_path = "/home/pirwani/SNPSFuzzer/monitor-bin/ftp.txt";
           
           g_monitor = monitor_start(eval_path, spec_path, "ftp");
           if (g_monitor) {
@@ -11652,8 +11648,6 @@ int main(int argc, char** argv) {
           const char *eval_path = getenv("LTL_EVAL_PATH");
           const char *spec_path = getenv("LTL_SPEC_PATH");
           
-          if (!eval_path) eval_path = "./formula_parser";
-          if (!spec_path) spec_path = "./monitor-bin/ssh.txt";
           
           g_monitor = monitor_start(eval_path, spec_path, "ssh");
           if (g_monitor) {
@@ -11669,11 +11663,9 @@ int main(int argc, char** argv) {
       } else if (!strcmp(optarg, "DTLS12")) {
         // Initialize monitor for DTLS12
         if (!g_monitor_initialized) {
-          // const char *eval_path = getenv("LTL_EVAL_PATH");
-          // const char *spec_path = getenv("LTL_SPEC_PATH");
+          const char *eval_path = getenv("LTL_EVAL_PATH");
+          const char *spec_path = getenv("LTL_SPEC_PATH");
           
-          const char * eval_path = "/home/pirwani/SNPSFuzzer/formula_parser";
-          const char * spec_path = "/home/pirwani/SNPSFuzzer/monitor-bin/dtls.ltl";
           
           g_monitor = monitor_start(eval_path, spec_path, "dtls");
           if (g_monitor) {
@@ -11692,11 +11684,9 @@ int main(int argc, char** argv) {
       } else if (!strcmp(optarg, "DNS")) {
         // Initialize monitor for DNS
         if (!g_monitor_initialized) {
-          // const char *eval_path = getenv("LTL_EVAL_PATH");
-          // const char *spec_path = getenv("LTL_SPEC_PATH");
+          const char *eval_path = getenv("LTL_EVAL_PATH");
+          const char *spec_path = getenv("LTL_SPEC_PATH");
           
-          const char *eval_path = "/home/pirwani/SNPSFuzzer/formula_parser";
-          const char *spec_path = "/home/pirwani/SNPSFuzzer/monitor-bin/dnsmasq.ltl";
           
           g_monitor = monitor_start(eval_path, spec_path, "dnsmasq");
           if (g_monitor) {

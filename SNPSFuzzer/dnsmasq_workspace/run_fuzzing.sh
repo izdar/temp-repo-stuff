@@ -1,6 +1,7 @@
 #!/bin/bash
-
-export SNPSFUZZER=/home/pirwani/SNPSFuzzer/
+export SNPSFUZZER="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export LTL_EVAL_PATH=$SNPSFUZZER/formula_parser
+export LTL_SPEC_PATH=$SNPSFUZZER/monitor-bin/dnsmasq.ltl
 export AFL_PATH=$SNPSFUZZER
 export WORKDIR=$(pwd)
 

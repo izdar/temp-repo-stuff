@@ -1,7 +1,7 @@
 #!/bin/bash
 
-export WORKDIR=/home/pirwani/SNPSFuzzer/tinydtls_workspace
-export SNPSFUZZER=/home/pirwani/SNPSFuzzer
+export SNPSFUZZER="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export WORKDIR=$SNPSFUZZER/tinydtls_workspace
 export AFL_PATH=$SNPSFUZZER
 
 # LTL Monitor Configuration - USE ABSOLUTE PATHS

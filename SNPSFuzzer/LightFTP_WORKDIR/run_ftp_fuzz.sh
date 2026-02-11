@@ -4,12 +4,12 @@ set -euo pipefail
 # -----------------------------------------------------------------------------
 # Paths
 # -----------------------------------------------------------------------------
-export SNPSFUZZER=/home/pirwani/SNPSFuzzer
+export SNPSFUZZER="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export AFL_PATH=$SNPSFUZZER
 
 # Your existing LightFTP build directory
-export LIGHTFTP_DIR=/home/pirwani/SNPSFuzzer/LightFTP/Source/Release
-export WORKDIR=/home/pirwani/SNPSFuzzer/LightFTP_WORKDIR
+export LIGHTFTP_DIR=$SNPSFUZZER/LightFTP/Source/Release
+export WORKDIR=$SNPSFUZZER/LightFTP_WORKDIR
 
 # Target server + config
 TARGET="$LIGHTFTP_DIR/fftp"

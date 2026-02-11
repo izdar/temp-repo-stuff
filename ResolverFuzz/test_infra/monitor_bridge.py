@@ -20,11 +20,11 @@ from predicate_adapter import (
 END = "__END_SESSION__"
 
 # -------- CONFIGURATION --------
-MONITOR_BIN = "/home/kalok/ResolverFuzz/ResolverFuzz/ltl-parser/formula_parser"
-MONITOR_SPEC = "/home/kalok/ResolverFuzz/ResolverFuzz/ltl-parser/dns-infra-spec.txt"
+MONITOR_BIN = "../ltl-parser/formula_parser"
+MONITOR_SPEC = "../ltl-parser/dns-infra-spec.txt"
 MONITOR_CMD = [MONITOR_BIN, MONITOR_SPEC]
 
-MONITOR_LOG_DIR = Path("/home/kalok/ResolverFuzz/ResolverFuzz/monitor_logs/")
+MONITOR_LOG_DIR = Path("../monitor_logs/")
 MONITOR_LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 MONITOR_STARTUP_WAIT = 0.1
