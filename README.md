@@ -8,7 +8,9 @@ Each run will output the fuzzer output along with three additional files: `monit
 
 ## Note
 
-We understand that fuzzing setups may be non-trivial; unfortunately, that is out of our control, as we are bound by the fuzzer frameworks. At a high level, AFLNET works within Docker containers with the runtime files generated within the specific docker instance. SNPSFuzzer runs natively, and therefore the files will be within the respective `<protocol_implementation_name>_workspace` folders. 
+We understand that fuzzing setups may be non-trivial; unfortunately, that is out of our control, as we are bound by the fuzzer frameworks. At a high level, AFLNET works within Docker containers with the runtime files generated within the specific docker instance. SNPSFuzzer runs natively, and therefore the files will be within the respective `<protocol_implementation_name>_workspace` folders. For ResolverFuzz, the generated files should be in the ResolverFuzz root directory, with additional logs in the `monitor_logs/` directory.
+
+The SAECRED setup is a bit more invovled as it requires multiple virtual interface setups, the details are below.
 
 
 
