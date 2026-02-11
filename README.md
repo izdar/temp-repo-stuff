@@ -1,4 +1,19 @@
-To run CFS, you must compile `hostapd` by following this tutorial:
+# Running Setup
+
+This repository contains the modified versions of AFLNET, SNPSFuzzer, ResolverFuzz and SAECRED. To run each of them, simply follow the fuzzer instructions in each of the respective folders. CFS does not require any external modifications to the fuzzers and the hooks are already in place. Simply running each fuzzer by following their tutorials will run CFS alongside the fuzzer.
+
+## Output
+
+Each run will output the fuzzer output along with three additional files: `monitor.log`, `monitor_violations.txt` and `runtime_monitor.txt` where `runtime_monitor.txt` contains `\n` seperated violations per test trace. Each `\n` has the following structure `Property ID: <trace>` where the property ID corresponds to the properties violated, and the triggering test case. The exact `ID: Property` mapping can be found in `monitor.log`.
+
+## Note
+
+We understand that fuzzing setups may be non-trivial, unfortunately that is out of our control as we are bound by the fuzzer frameworks. At a high-level AFLNET works within Docker containers, with the runtime files generated within the specific docker instance. SNPSFuzzer runs natively, therefore the files will be within the respective `<protocol_implementation_name>_workspace` folders. 
+
+
+
+# SAECRED Setup
+To run CFS for WPA3, you must compile `hostapd` by following this tutorial:
 
 ## Using simulated Wi-Fi interfaces
 
