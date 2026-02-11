@@ -2,9 +2,11 @@
 
 This repository contains the modified versions of AFLNET, SNPSFuzzer, ResolverFuzz and SAECRED. To run each of them, simply follow the fuzzer instructions in each of the respective folders. ResolverFuzz contains a script `run_campaigns.sh` that runs ResolverFuzz in Forward-only mode. The SAECRED setup, however, is a bit more involved as it requires multiple virtual interface setups; the details are in the next section. **CFS does not require any external modifications to the fuzzers and the hooks are already in place. Simply running each fuzzer by following their tutorials will run CFS alongside the fuzzer.**
 
-# SNPSFuzzer protocol implementation setup
+# SNPSFuzzer protocol implementation setup and running instructions
 
 Since SNPSFuzzer does not, by default, give an end-to-end implementation build script, we devised bash scripts for each of the implementations we tested. `./dnsmasq_fuzzing.sh` clones dnsmasq and builds the target, `tinydtls_fuzzing.sh` clones tinyDTLS and builds it. For LightFTP, enter `LightFTP/Source/Release/` and simply `make`.
+
+In the `LightFTP_WORKDIR` directory, simply run `run_ftp_fuzz.sh`. In the `tinydtls_workspace`, run `run_fuzzing.sh`. In the `dnsmasq_workspace`, run `run_fuzzing.sh`.
 
 ## Output
 
