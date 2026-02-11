@@ -4,11 +4,11 @@ This repository contains the modified versions of AFLNET, SNPSFuzzer, ResolverFu
 
 ## Output
 
-Each run will output the fuzzer output along with three additional files: `monitor.log`, `monitor_violations.txt` and `runtime_monitor.txt` where `runtime_monitor.txt` contains `\n` seperated violations per test trace. Each `\n` has the following structure `Property ID: <trace>` where the property ID corresponds to the properties violated, and the triggering test case. The exact `ID: Property` mapping can be found in `monitor.log`.
+Each run will output the fuzzer output along with three additional files: `monitor.log`, `monitor_violations.txt` and `runtime_monitor.txt` where `runtime_monitor.txt` contains `\n` separated violations per test trace. Each `\n` has the following structure `Property ID: <trace>` where the property ID corresponds to the properties violated, and the triggering test case. The exact `ID: Property` mapping can be found in `monitor.log`.
 
 ## Note
 
-We understand that fuzzing setups may be non-trivial, unfortunately that is out of our control as we are bound by the fuzzer frameworks. At a high-level AFLNET works within Docker containers, with the runtime files generated within the specific docker instance. SNPSFuzzer runs natively, therefore the files will be within the respective `<protocol_implementation_name>_workspace` folders. 
+We understand that fuzzing setups may be non-trivial; unfortunately, that is out of our control, as we are bound by the fuzzer frameworks. At a high level, AFLNET works within Docker containers with the runtime files generated within the specific docker instance. SNPSFuzzer runs natively, and therefore the files will be within the respective `<protocol_implementation_name>_workspace` folders. 
 
 
 
