@@ -18,7 +18,7 @@ set -euo pipefail
 # ========================= CONFIGURATION ====================================
 
 # Root of the ResolverFuzz repo
-RF_ROOT=$(pwd)
+RF_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Where the test scripts live
 INFRA_DIR="${RF_ROOT}/test_infra"
