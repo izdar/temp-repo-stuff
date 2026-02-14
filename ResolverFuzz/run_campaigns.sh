@@ -18,7 +18,7 @@ set -euo pipefail
 # ========================= CONFIGURATION ====================================
 
 # Root of the ResolverFuzz repo
-RF_ROOT="/home/kalok/ResolverFuzz/ResolverFuzz"
+RF_ROOT=$(pwd)
 
 # Where the test scripts live
 INFRA_DIR="${RF_ROOT}/test_infra"
